@@ -1,7 +1,9 @@
+import java.util.*;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Queue;
+import java.util.ArrayList;
 
 /**
  * The Scheduler class is the central program of the fire fighting
@@ -10,10 +12,14 @@ import java.util.Queue;
  * the fire has been put out.
  *
  * @author Kevin Abeykoon (101301971)
+ * @author Aryan Kumar Singh (101299776)
  */
 public class Scheduler {
     private Queue<FireEvent> fireEventQueue; // Queue of fire events
     private Map<Integer, DroneState> droneStates;  // List of drones and their states
+
+    // GUI views that will display changes in the model
+    private transient List<GUI_View> views;
 
     /**
      * Constructor to create a variable amount of
@@ -37,9 +43,20 @@ public class Scheduler {
      * @param event fire event
      */
     public synchronized void receiveFireEvent(FireEvent event){
-        System.out.println("Scheduler: Fire at zone " + event.zoneId + ".");
+        // MUST HAVE The firesubsystem convert some input like a text or csv file
+        // and craft a corresponding FireEvent obj or datastructure that will be communicated to Scheduler
+
+        System.out.println("Scheduler: Fire at zone " + event.zoneId() + ".");
         fireEventQueue.add(event);
 
+        notifyAll(); // Wake up drone threads that are waiting
+    }
+
+    /**
+     * Sorts the fire incident algorithm based on which fire has the highest priority at head
+     */
+    public synchronized Queue<FireEvent> sortFireIncidents(){
+        return this.fireEventQueue;
     }
 
     /**
@@ -47,10 +64,26 @@ public class Scheduler {
       * @param droneId ID of drone
      */
     public synchronized FireEvent requestMission(int droneId){
-        if(droneStates.get(droneId).droneState == DroneState.state.IDLE && !fireEventQueue.isEmpty()){
+        // Im assuming the drone class will ensure that the scheduler is not invoked
+        // when they are currently servicing a job but when they have completed a specific task?
+
+        while (fireEventQueue.isEmpty()) {
+            try {
+                wait(); // Drone waits for work
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+
+        // Returns the element at the head of the Queue. (not organized by scheduling algorithm yet)
+        // MAYBE DO A SORT BEFORE WE POLL FOR THE FIRST QUEUE ELEMENT FOR DRONE
+
+        if(droneStates.get(droneId).droneState == DroneState.State.IDLE){
             FireEvent mission = fireEventQueue.poll();
             droneStates.put(droneId, new DroneState());// need to change to make it ONROUTE
-            System.out.println("Scheduler: Drone " + droneId + " dispatched to zone " + mission.zoneId + ".");
+            System.out.println("Scheduler: Drone " + droneId + " dispatched to zone " + mission.zoneId() + "."); // getter instead of public attribute of zones
+
             return mission;
         }
 
@@ -68,6 +101,9 @@ public class Scheduler {
         droneStates.put(droneId, new DroneState()); // need to change to make it IDLE
         System.out.println("Scheduler: Drone " + droneId + " completed mission at zone " + zoneId + ".");
         notifyFireSubsystem(zoneId);
+
+        // Notify waiting drones looking for work
+        notifyAll();
     }
 
     /**
