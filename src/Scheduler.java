@@ -46,14 +46,14 @@ public class Scheduler {
         // MUST HAVE The firesubsystem convert some input like a text or csv file
         // and craft a corresponding FireEvent obj or datastructure that will be communicated to Scheduler
 
-        System.out.println("Scheduler: Fire at zone " + event.zoneId + ".");
+        System.out.println("Scheduler: Fire at zone " + event.zoneId() + ".");
         fireEventQueue.add(event);
 
         notifyAll(); // Wake up drone threads that are waiting
     }
 
     /**
-     * Sorts the fire incident algorithm based on which fire has highest priority at head
+     * Sorts the fire incident algorithm based on which fire has the highest priority at head
      */
     public synchronized Queue<FireEvent> sortFireIncidents(){
         return this.fireEventQueue;
@@ -82,7 +82,7 @@ public class Scheduler {
         if(droneStates.get(droneId).droneState == DroneState.State.IDLE){
             FireEvent mission = fireEventQueue.poll();
             droneStates.put(droneId, new DroneState());// need to change to make it ONROUTE
-            System.out.println("Scheduler: Drone " + droneId + " dispatched to zone " + mission.zoneId + "."); // getter instead of public attribute of zones
+            System.out.println("Scheduler: Drone " + droneId + " dispatched to zone " + mission.zoneId() + "."); // getter instead of public attribute of zones
 
             return mission;
         }
