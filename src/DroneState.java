@@ -14,8 +14,7 @@ public class DroneState extends Thread {
     private int yGridLocation;
     private int waterRemaining;  // in Litres
     private Scheduler scheduler;
-
-    State droneState;
+    private State droneState;
 
     public DroneState(int droneId, Scheduler scheduler){
         this.droneId = droneId;
@@ -36,6 +35,11 @@ public class DroneState extends Thread {
         this.waterRemaining = 15;
         this.scheduler = scheduler;
     }
+
+    public int getX() {return this.xGridLocation;}
+    public int getY() {return this.yGridLocation;}
+    public int getWaterRemaining() {return this.waterRemaining;}
+    public State getDroneState() {return this.droneState;}
 
     public void moveDrone(int targetX, int targetY) {
         while (!((targetX == xGridLocation) && (targetY == yGridLocation))) {
