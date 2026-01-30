@@ -1,5 +1,5 @@
-public class DroneState extends Thread {
-    public enum State {
+public class DroneSubsystem extends Thread {
+    public enum DroneState {
         IDLE,
         ONROUTE,
         EXTINGUISHING,
@@ -14,19 +14,21 @@ public class DroneState extends Thread {
     private int yGridLocation;
     private int waterRemaining;  // in Litres
     private Scheduler scheduler;
-    private State droneState;
+    private DroneState droneState;
 
-    public DroneState(int droneId, Scheduler scheduler){
+    private SimulationClock clock; // centralized clock
+
+    public DroneSubsystem(int droneId, Scheduler scheduler){
         this.droneId = droneId;
         xGridLocation = 0;
         yGridLocation = 0;
         zoneId = 0;
-        droneState = State.IDLE;
+        droneState = DroneState.IDLE;
         waterRemaining = 15;
         this.scheduler = scheduler;
     }
 
-    public DroneState(int droneId, int xGridLocation, int yGridLocation, int zoneId, State droneState, Scheduler scheduler){
+    public DroneSubsystem(int droneId, int xGridLocation, int yGridLocation, int zoneId, DroneState droneState, Scheduler scheduler){
         this.droneId = droneId;
         this.xGridLocation = xGridLocation;
         this.yGridLocation = yGridLocation;
@@ -39,18 +41,33 @@ public class DroneState extends Thread {
     public int getX() {return this.xGridLocation;}
     public int getY() {return this.yGridLocation;}
     public int getWaterRemaining() {return this.waterRemaining;}
-    public State getDroneState() {return this.droneState;}
+    public DroneState getDroneState() {return this.droneState;}
 
+
+    // Update moveDrone to use simulation time
     public void moveDrone(int targetX, int targetY) {
+        System.out.printf("Drone %d: Starting movement at simulation time %d%n",
+                droneId, clock.getSimulationTimeSeconds());
+
         while (!((targetX == xGridLocation) && (targetY == yGridLocation))) {
             if (targetX > xGridLocation) xGridLocation++;
             if (targetX < xGridLocation) xGridLocation--;
             if (targetY > yGridLocation) yGridLocation++;
             if (targetY < yGridLocation) yGridLocation--;
-            //Update Location on map
-            //Sleep for a bit
+
+            // Simulate time passing for movement
+            try {
+                // Each grid movement takes 1 second of simulation time
+                Thread.sleep(1000); // Real 1 second = 1 simulation second
+
+                System.out.printf("Drone %d: Moved to (%d, %d) at simulation time %d%n",
+                        droneId, xGridLocation, yGridLocation, clock.getSimulationTimeSeconds());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
-        setState(State.IDLE);
+        setState(DroneState.IDLE);
     }
 
     public int extinguishFire(int waterNeeded) {
@@ -59,7 +76,7 @@ public class DroneState extends Thread {
         System.out.printf("Drone %d: Extinguishing Fire\n", droneId);
         //Sleep for a bit
         System.out.printf("Drone %d: Done Extinguishing\n", droneId);
-        setState(State.IDLE);
+        setState(DroneState.IDLE);
         this.waterRemaining -= waterUsed;
         return waterUsed;
     }
@@ -69,13 +86,13 @@ public class DroneState extends Thread {
         //Sleep for a bit
         System.out.printf("Drone %d: Done refilling water tank\n", droneId);
         this.waterRemaining = 15;
-        setState(State.IDLE);
+        setState(DroneState.IDLE);
     }
 
-    public void setState(State droneState) {this.droneState = droneState;}
+    public void setState(DroneState droneState) {this.droneState = droneState;}
 
     public void run() {
-        while (droneState != State.DECOMISSIONED) {
+        while (droneState != DroneState.DECOMISSIONED) {
             scheduler.requestMission(droneId);
             scheduler.missionCompleted(droneId, zoneId);
         }

@@ -3,13 +3,12 @@ import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
 
-public class DroneSwarmFrame extends JFrame implements GUI_View {
+public class DroneSwarmFrame extends JFrame {
     private MapPanel mapPanel;
     private StatusPanel statusPanel;
     private ControlPanel controlPanel;
 
     private Scheduler model;
-    private Controller controller; //listens for buttons or card clicks, and updates the model
 
     public DroneSwarmFrame(Scheduler model) {
         setTitle("Firefighting Drone Swarm - Control Center");
@@ -33,9 +32,7 @@ public class DroneSwarmFrame extends JFrame implements GUI_View {
         // Attach model to this view
         this.model = model;
 
-        // Set up controller
-        controller = new Controller(model, this);
-        // Set up action listeners (will be connected to controller later)
+
     }
 
 
@@ -54,16 +51,16 @@ public class DroneSwarmFrame extends JFrame implements GUI_View {
 
             // File selection button
             loadFileButton = new JButton("Load Incident File");
-            loadFileButton.addActionListener(controller);
+            //loadFileButton.addActionListener();
 
             // Start/Stop buttons
             startButton = new JButton("Start Simulation");
             startButton.setEnabled(false); // Disabled until file loaded
-            startButton.addActionListener(controller);
+            //startButton.addActionListener();
 
             stopButton = new JButton("Stop Simulation");
             stopButton.setEnabled(false);
-            stopButton.addActionListener(controller);
+            //stopButton.addActionListener();
 
             // File name display
             fileLabel = new JLabel("No file loaded");

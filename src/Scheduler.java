@@ -1,12 +1,7 @@
-import java.util.*;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Queue;
-
-import DroneState.State;
-
-import java.util.ArrayList;
 
 /**
  * The Scheduler class is the central program of the fire fighting
@@ -19,10 +14,7 @@ import java.util.ArrayList;
  */
 public class Scheduler {
     private Queue<FireEvent> fireEventQueue; // Queue of fire events
-    private Map<Integer, DroneState> droneStates;  // List of drones and their states
-
-    // GUI views that will display changes in the model
-    private transient List<GUI_View> views;
+    private Map<Integer, DroneSubsystem> droneStates;  // List of drones and their states
 
     /**
      * Constructor to create a variable amount of
@@ -34,7 +26,7 @@ public class Scheduler {
         fireEventQueue = new LinkedList<>();
 
         for(int i = 0; i < numberOfDrones; i++){
-            droneStates.put(i, new DroneState(i, this));
+            droneStates.put(i, new DroneSubsystem(i, this));
         }
 
     }
@@ -64,17 +56,17 @@ public class Scheduler {
 
     /**
      * The drone calls this method to ask for work
-      * @param droneId ID of drone
+     * @param droneId ID of drone
      */
     public synchronized void requestMission(int droneId){
-        DroneState drone = droneStates.get(droneId);
+        DroneSubsystem drone = droneStates.get(droneId);
         //Check drone water
         if (drone.getWaterRemaining() <= 0) {
-            drone.setState(DroneState.State.REFILLING);
-            drone.moveDrone(0, 0);  //Assuming refilling base is 0, 0
+            drone.setState(DroneSubsystem.DroneState.REFILLING);
+            drone.moveDrone(100, 100);  //Assuming refilling base is 0, 0
         }
         else {
-        //Check the drones associated mission
+            //Check the drones associated mission
             //If no mission, put it in a wait queue until a mission is available for it
             //
             //
@@ -93,7 +85,7 @@ public class Scheduler {
             // Returns the element at the head of the Queue. (not organized by scheduling algorithm yet)
             // MAYBE DO A SORT BEFORE WE POLL FOR THE FIRST QUEUE ELEMENT FOR DRONE
 
-            if(drone.getDroneState() == DroneState.State.IDLE){
+            if(drone.getDroneState() == DroneSubsystem.DroneState.IDLE){
                 FireEvent mission = fireEventQueue.poll();
                 //droneStates.put(droneId, new DroneState(i, this));// need to change to make it ONROUTE
                 System.out.println("Scheduler: Drone " + droneId + " dispatched to zone " + mission.zoneId() + "."); // getter instead of public attribute of zones
@@ -106,13 +98,13 @@ public class Scheduler {
             //
 
             //If mission, check coords of drone
-                //If not at site, tell it to move
-                drone.moveDrone(1, 1);  //Placeholder Numbers
+            //If not at site, tell it to move
+            drone.moveDrone(1, 1);  //Placeholder Numbers
 
-                //If at site, tell it to extinguish
-                drone.extinguishFire(5); //Number based on associated event
+            //If at site, tell it to extinguish
+            drone.extinguishFire(5); //Number based on associated event
         }
-        
+
     }
 
     /**
@@ -123,7 +115,7 @@ public class Scheduler {
      * @param zoneId ID of zone
      */
     public synchronized void missionCompleted(int droneId, int zoneId){
-        droneStates.put(droneId, new DroneState(i, this)); // need to change to make it IDLE
+        droneStates.put(droneId, new DroneSubsystem(droneId, this)); // need to change to make it IDLE
         System.out.println("Scheduler: Drone " + droneId + " completed mission at zone " + zoneId + ".");
         notifyFireSubsystem(zoneId);
 
