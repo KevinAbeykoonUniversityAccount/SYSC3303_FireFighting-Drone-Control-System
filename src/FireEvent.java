@@ -1,11 +1,75 @@
-/**
- * Data transfer object representing a fire incident or drone request.
- * @param zoneId The ID of the zone
- * @param eventType The type of event (FIRE_DETECTED/DRONE_REQUEST)
- * @param severity The severity of the fire (HIGH/MODERATE/LOW)
- * @param secondsFromStart //The timestamp
- */
-public record FireEvent(int zoneId, String eventType, String severity, int secondsFromStart) {
+import java.awt.*;
+
+public class FireEvent{
+    public enum FireSeverity {
+        LOW,
+        MODERATE,
+        HIGH
+    }
+
+    private final int zoneId;
+    private String eventType;
+    private FireSeverity severity;
+    private int waterRequired;
+    private int secondsFromStart;
+    private long fireIncidentStartTime; // Real-time when simulation started
+
+
+    public FireEvent(int zoneId, String eventType, String severity, int secondsFromStart) {
+        this.zoneId = zoneId;
+        this.eventType = eventType;
+        this.secondsFromStart = secondsFromStart;
+
+        switch(severity.toUpperCase()){
+            case "LOW":
+                this.severity = FireSeverity.LOW;
+                this.waterRequired = 10;
+                break;
+
+            case "MODERATE":
+                this.severity = FireSeverity.MODERATE;
+                this.waterRequired = 20;
+                break;
+
+            case "HIGH":
+                this.severity = FireSeverity.HIGH;
+                this.waterRequired = 30;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+
+    public int getZoneId() {
+        return zoneId;
+    }
+
+    public String getEventType() {
+        return eventType;
+    }
+
+    public FireSeverity getSeverity() {
+        return severity;
+    }
+
+    public void setWaterRequired(int waterRequired) {
+        this.waterRequired = waterRequired;
+    }
+
+    public int getWaterRequired() {
+        return waterRequired;
+    }
+
+    public int getSecondsFromStart() {
+        return secondsFromStart;
+    }
+
+    public long getFireStartTime() {
+        return fireIncidentStartTime;
+    }
+
 
     @Override
     public String toString() {

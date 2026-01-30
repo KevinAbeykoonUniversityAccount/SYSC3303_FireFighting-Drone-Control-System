@@ -1,7 +1,4 @@
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
-import java.util.Queue;
+import java.util.*;
 
 /**
  * The Scheduler class is the central program of the fire fighting
@@ -16,6 +13,9 @@ public class Scheduler {
     private Queue<FireEvent> fireEventQueue; // Queue of fire events
     private Map<Integer, DroneSubsystem> droneStates;  // List of drones and their states
 
+    private final SimulationClock clock;
+
+
     /**
      * Constructor to create a variable amount of
      * drones, starting in the IDLE state.
@@ -29,6 +29,7 @@ public class Scheduler {
             droneStates.put(i, new DroneSubsystem(i, this));
         }
 
+        this.clock = SimulationClock.getInstance();
     }
 
     /**
@@ -38,10 +39,7 @@ public class Scheduler {
      * @param event fire event
      */
     public synchronized void receiveFireEvent(FireEvent event){
-        // MUST HAVE The firesubsystem convert some input like a text or csv file
-        // and craft a corresponding FireEvent obj or datastructure that will be communicated to Scheduler
-
-        System.out.println("Scheduler: Fire at zone " + event.zoneId() + ".");
+        System.out.println("Scheduler: Fire at zone " + event.getZoneId() + ".\n");
         fireEventQueue.add(event);
 
         notifyAll(); // Wake up drone threads that are waiting
@@ -50,7 +48,45 @@ public class Scheduler {
     /**
      * Sorts the fire incident algorithm based on which fire has the highest priority at head
      */
-    public synchronized Queue<FireEvent> sortFireIncidents(){
+    public synchronized Queue<FireEvent> sortFireEventsQueue(){
+        // Convert queue to list for sorting
+        List<FireEvent> events = new ArrayList<>(fireEventQueue);
+
+        // Sort using custom comparator
+        events.sort(new Comparator<FireEvent>() {
+            @Override
+            public int compare(FireEvent e1, FireEvent e2) {
+                // 1. Compare by severity (HIGH > MODERATE > LOW)
+                int severityCompare = Integer.compare(
+                        getSeverityPriority(e2.getSeverity()),
+                        getSeverityPriority(e1.getSeverity())
+                );
+
+                if (severityCompare != 0) {
+                    return severityCompare; // Different severity, sort by severity
+                }
+
+                // 2. Same severity: compare by waiting time (longer waiting = higher priority)
+                long waitTime1 = clock.getSimulationTimeSeconds() - e1.getFireStartTime();
+                long waitTime2 = clock.getSimulationTimeSeconds() - e2.getFireStartTime();
+
+                return Long.compare(waitTime2, waitTime1); // Longer waiting first
+            }
+
+            private int getSeverityPriority(FireEvent.FireSeverity severity) {
+                switch (severity) {
+                    case HIGH: return 3;
+                    case MODERATE: return 2;
+                    case LOW: return 1;
+                    default: return 0;
+                }
+            }
+        });
+
+        // Clear and re-add sorted events
+        fireEventQueue.clear();
+        fireEventQueue.addAll(events);
+
         return this.fireEventQueue;
     }
 
@@ -58,52 +94,34 @@ public class Scheduler {
      * The drone calls this method to ask for work
      * @param droneId ID of drone
      */
-    public synchronized void requestMission(int droneId){
+    public synchronized FireEvent requestMission(int droneId){
         DroneSubsystem drone = droneStates.get(droneId);
-        //Check drone water
+        // Check drone water
         if (drone.getWaterRemaining() <= 0) {
             drone.setState(DroneSubsystem.DroneState.REFILLING);
             drone.moveDrone(100, 100);  //Assuming refilling base is 0, 0
         }
-        else {
-            //Check the drones associated mission
-            //If no mission, put it in a wait queue until a mission is available for it
-            //
-            //
-            // Im assuming the drone class will ensure that the scheduler is not invoked
-            // when they are currently servicing a job but when they have completed a specific task?
 
-            while (fireEventQueue.isEmpty()) {
-                try {
-                    wait(); // Drone waits for work
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    //return null;
-                }
+        // Wait for work if queue is empty
+        while (fireEventQueue.isEmpty()) {
+            try {
+                wait(); // Drone waits for work
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
             }
-
-            // Returns the element at the head of the Queue. (not organized by scheduling algorithm yet)
-            // MAYBE DO A SORT BEFORE WE POLL FOR THE FIRST QUEUE ELEMENT FOR DRONE
-
-            if(drone.getDroneState() == DroneSubsystem.DroneState.IDLE){
-                FireEvent mission = fireEventQueue.poll();
-                //droneStates.put(droneId, new DroneState(i, this));// need to change to make it ONROUTE
-                System.out.println("Scheduler: Drone " + droneId + " dispatched to zone " + mission.zoneId() + "."); // getter instead of public attribute of zones
-
-                //return mission;
-            }
-
-            //return null;
-            //
-            //
-
-            //If mission, check coords of drone
-            //If not at site, tell it to move
-            drone.moveDrone(1, 1);  //Placeholder Numbers
-
-            //If at site, tell it to extinguish
-            drone.extinguishFire(5); //Number based on associated event
         }
+
+        // Sort the queue before assigning missions
+        sortFireEventsQueue();
+        FireEvent mission = fireEventQueue.poll();
+
+        if (mission != null) {
+            System.out.printf("Scheduler: Drone %d assigned to Zone %d (Severity: %s, Water needed: %dL)%n \n",
+                    droneId, mission.getZoneId(), mission.getSeverity(), mission.getWaterRequired());
+        }
+
+        return mission; // Drone handles the mission itself
 
     }
 
@@ -114,14 +132,38 @@ public class Scheduler {
      * @param droneId ID of drone
      * @param zoneId ID of zone
      */
-    public synchronized void missionCompleted(int droneId, int zoneId){
+    public synchronized void missionCompleted(int droneId, int zoneId, int waterUsed){
         droneStates.put(droneId, new DroneSubsystem(droneId, this)); // need to change to make it IDLE
-        System.out.println("Scheduler: Drone " + droneId + " completed mission at zone " + zoneId + ".");
+        System.out.printf("Scheduler: Drone %d completed mission at zone %d (used %dL water)%n",
+                droneId, zoneId, waterUsed);
         notifyFireSubsystem(zoneId);
 
         // Notify waiting drones looking for work
         notifyAll();
     }
+
+
+    /**
+     * Drone reports going for refill
+     */
+    public synchronized void droneRefilling(int droneId) {
+        System.out.println("Scheduler: Drone " + droneId + " going for water refill");
+    }
+
+    /**
+     * Drone reports refill complete
+     */
+    public synchronized void droneRefillComplete(int droneId) {
+        System.out.println("Scheduler: Drone " + droneId + " refill complete, ready for missions");
+        notifyAll(); // Wake up if it was waiting
+    }
+
+
+
+
+
+
+
 
     /**
      * Alerts the fire subsystem that the fire has been extinguished.
