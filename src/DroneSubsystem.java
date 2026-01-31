@@ -214,7 +214,7 @@ public class DroneSubsystem extends Thread {
 
                     // The drone then extinguishes the fire once reaching the location
                     setState(DroneState.EXTINGUISHING);
-                    int waterNeeded = Math.min(mission.getWaterRequired(), 15); // Max drone capacity
+                    int waterNeeded = Math.min(mission.getWaterRemaining(), 15); // Max drone capacity
                     int waterUsed = extinguishFire(waterNeeded);
 
                     // 4. Report completion
