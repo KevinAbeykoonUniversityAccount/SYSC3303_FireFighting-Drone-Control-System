@@ -1,4 +1,13 @@
 import java.awt.*;
+/**
+ * The FireEvent class is the object that the sysytem uses
+ * communicate information about the fire. The fire
+ * information updates in real-time as the fires are dealt
+ * with.
+ *
+ * @author Aryan Kumar Singh (101299776)
+ * @author Kevin Abeykoon (101301971)
+ */
 
 public class FireEvent{
     public enum FireSeverity {
