@@ -10,7 +10,6 @@ import java.io.IOException;
  * @author Rayyan Kashif (101274266)
  * @author Aryan Kumar Singh (101299776)
  */
- */
 public class FireIncidentSubsystem implements Runnable {
     private final Scheduler scheduler;
     private final String inputFileName;
