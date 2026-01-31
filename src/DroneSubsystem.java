@@ -6,9 +6,9 @@
  * supply, then it returns to base to refill. Otherwise it waits for its
  * next instruction.
  *
- * @author Kevin Abeykoon (101301971)
- * @author Aryan Kumar Singh (101299776)
  * @author Abdullah Khan (101305235)
+ * @author Aryan Kumar Singh (101299776)
+ * @author Kevin Abeykoon (101301971)
  */
 
 public class DroneSubsystem extends Thread {
