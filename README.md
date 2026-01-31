@@ -48,14 +48,21 @@ This project simulates a **firefighting system using autonomous drones** coordin
 
 1. Run the Main class
 2. Observe simulation output in the console
-3. Kill the threads manually aft Sier it has finished
+3. Kill the threads manually after it has finished
 
 
 ## Authors
 1. Aryan Kumar Singh (101299776)
+- Worked on the implementation of all 9 classes including the GUI
+
 2. Kevin Abeykoon (101301971)
-- Worked on implementation of Drone State, Drone Subsystem, FireEvent, and Scheduler
+- Worked on the implementation of Drone State, DroneSubsystem, FireEvent, and Scheduler
 - Worked on Javadoc documentation for all classes and README
    
-4. Rayyan Kashif (101274266)
-5. Abdullah Khan (101305235)
+3. Rayyan Kashif (101274266)
+- Worked on the implementation of FireEventSubsystem
+- Worked on UML Class Diagrams
+  
+4. Abdullah Khan (101305235)
+- Worked on the implementation of DroneSubsystem
+- Worked on UML Sequence Diagrams
