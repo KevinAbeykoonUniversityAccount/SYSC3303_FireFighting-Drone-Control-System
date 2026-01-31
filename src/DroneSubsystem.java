@@ -1,3 +1,16 @@
+/**
+ * The DroneSubsystem class runs on its own thread and represents a single
+ * drone. When the drone is IDLE, it requests a mission from the Scheduler.
+ * After waiting and receiving a mission, it moves to the location of the 
+ * fire and starts to extinguish it. If the drone has exhausted its water 
+ * supply, then it returns to base to refill. Otherwise it waits for its
+ * next instruction.
+ *
+ * @author Kevin Abeykoon (101301971)
+ * @author Aryan Kumar Singh (101299776)
+ * @author Abdullah Khan (101305235)
+ */
+
 public class DroneSubsystem extends Thread {
     public enum DroneState {
         IDLE,
