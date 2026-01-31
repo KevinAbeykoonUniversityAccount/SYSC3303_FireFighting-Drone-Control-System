@@ -3,9 +3,13 @@ import java.io.FileReader;
 import java.io.IOException;
 
 /**
- * Reads an input file and creates fire events.
- * If an event is scheduled at a certain time, it waits until the simulation time reaches the scheduled time before sending the event.
- * Passes the fire events to the scheduler.
+ * Reads an input file and creates fire events. If an event is scheduled at 
+ * a certain time, it waits until the simulation time reaches the scheduled time 
+ * before sending the event. Passes the fire events to the scheduler.
+ *
+ * @author Rayyan Kashif (101274266)
+ * @author Aryan Kumar Singh (101299776)
+ */
  */
 public class FireIncidentSubsystem implements Runnable {
     private final Scheduler scheduler;
