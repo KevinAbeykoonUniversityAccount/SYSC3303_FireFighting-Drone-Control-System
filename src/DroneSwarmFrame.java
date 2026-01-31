@@ -1,3 +1,9 @@
+/**
+ * The DroneSwarmFrame is the main class for the GUI representation of the 
+ * simulation. It displays the zones, log, drone movement, fires, etc.
+ * 
+ * @author Aryan Kumar Singh (101299776)
+ */
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
