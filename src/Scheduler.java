@@ -36,7 +36,7 @@ public class Scheduler {
      * The Fire Subsystem uses this method to send
      * a fire event to the scheduler.
      *
-     * @param event fire event
+     * @param event fire event sent by fire incident subsystem
      */
     public synchronized void receiveFireEvent(FireEvent event){
         System.out.println("Scheduler: Fire at zone " + event.getZoneId() + ".\n");
@@ -47,6 +47,8 @@ public class Scheduler {
 
     /**
      * Sorts the fire incident algorithm based on which fire has the highest priority at head
+     *
+     * @return Sorted queue with next job placed at front
      */
     public synchronized Queue<FireEvent> sortFireEventsQueue(){
         // Convert queue to list for sorting
@@ -91,11 +93,14 @@ public class Scheduler {
     }
 
     /**
-     * The drone calls this method to ask for work
+     * The drone waits for a mission to combat a fire incident if available,
+     * then the scheduler assigns one from the queue
+     *
      * @param droneId ID of drone
      */
-    public synchronized FireEvent requestMission(int droneId){
+    public synchronized FireEvent requestMission(int droneId) throws InterruptedException {
         DroneSubsystem drone = droneStates.get(droneId);
+
         // Check drone water
         if (drone.getWaterRemaining() <= 0) {
             drone.setState(DroneSubsystem.DroneState.REFILLING);
@@ -114,15 +119,57 @@ public class Scheduler {
 
         // Sort the queue before assigning missions
         sortFireEventsQueue();
-        FireEvent mission = fireEventQueue.poll();
+        FireEvent originalMission = fireEventQueue.poll();
 
-        if (mission != null) {
-            System.out.printf("Scheduler: Drone %d assigned to Zone %d (Severity: %s, Water needed: %dL)%n \n",
-                    droneId, mission.getZoneId(), mission.getSeverity(), mission.getWaterRequired());
+        int droneCapacity = drone.getWaterRemaining();
+        int waterNeeded = originalMission.getWaterRequired();
+
+        if (droneCapacity <= 0) {
+            return null;
         }
 
-        return mission; // Drone handles the mission itself
+        // Calculate how much water this drone can handle
+        int waterToAssign = Math.min(droneCapacity, waterNeeded);
 
+        // Create a COPY of the event with REDUCED water requirement
+        int remainingWater = waterNeeded - waterToAssign;
+
+        if (remainingWater > 0) {
+            // Create copy with remaining water and add to queue
+            FireEvent copyForQueue = new FireEvent(
+                    originalMission.getZoneId(),
+                    originalMission.getEventType(),
+                    originalMission.getSeverity().toString(),
+                    (int)originalMission.getFireStartTime()
+            );
+            copyForQueue.setWaterRequired(remainingWater);
+
+            // Remove original, add copy back to queue
+            fireEventQueue.poll(); // Remove original
+            fireEventQueue.add(copyForQueue); // Add copy with reduced water
+
+            System.out.printf("Scheduler [%s]: Drone %d assigned PARTIAL mission to Zone %d (Severity: %s, Water: %dL, Remaining: %dL)%n%n",
+                    clock.getFormattedTime(), droneId, originalMission.getZoneId(),
+                    originalMission.getSeverity(), waterToAssign, remainingWater);
+        } else {
+            // No water remaining, just poll the original
+            fireEventQueue.poll(); // Remove original
+            System.out.printf("Scheduler [%s]: Drone %d assigned FULL mission to Zone %d (Severity: %s, Water: %dL)%n%n",
+                    clock.getFormattedTime(), droneId, originalMission.getZoneId(),
+                    originalMission.getSeverity(), waterToAssign);
+        }
+
+
+        // Create mission for drone with the water it will use
+        FireEvent droneMission = new FireEvent(
+                originalMission.getZoneId(),
+                originalMission.getEventType(),
+                originalMission.getSeverity().toString(),
+                (int)originalMission.getFireStartTime()
+        );
+        droneMission.setWaterRequired(waterToAssign);
+
+        return originalMission; // Return mission for drone
     }
 
     /**
@@ -132,19 +179,39 @@ public class Scheduler {
      * @param droneId ID of drone
      * @param zoneId ID of zone
      */
-    public synchronized void missionCompleted(int droneId, int zoneId, int waterUsed){
-        droneStates.put(droneId, new DroneSubsystem(droneId, this)); // need to change to make it IDLE
-        System.out.printf("Scheduler: Drone %d completed mission at zone %d (used %dL water)%n",
-                droneId, zoneId, waterUsed);
-        notifyFireSubsystem(zoneId);
+    public synchronized void missionCompleted(int droneId, int zoneId, int waterUsed) {
+        // Update drone state to IDLE (don't recreate the drone)
+        DroneSubsystem drone = droneStates.get(droneId);
+        if (drone != null) {
+            drone.setState(DroneSubsystem.DroneState.IDLE);
+        }
+
+        System.out.printf("Scheduler [%s]: Drone %d completed mission at zone %d (used %dL water)%n",
+                clock.getFormattedTime(), droneId, zoneId, waterUsed);
+
+        // Check if this zone still has fire events in queue
+        boolean zoneStillHasFire = false;
+        for (FireEvent event : fireEventQueue) {
+            if (event.getZoneId() == zoneId && event.getWaterRequired() > 0) {
+                zoneStillHasFire = true;
+                System.out.printf("Scheduler: Zone %d still needs %dL more water%n",
+                        zoneId, event.getWaterRequired());
+                break;
+            }
+        }
+
+        if (!zoneStillHasFire) {
+            notifyFireSubsystem(zoneId);
+        }
 
         // Notify waiting drones looking for work
         notifyAll();
     }
 
-
     /**
-     * Drone reports going for refill
+     * Drone reports it needs to refill
+     *
+     * @param droneId The id of the drone that has gone to refill
      */
     public synchronized void droneRefilling(int droneId) {
         System.out.println("Scheduler: Drone " + droneId + " going for water refill");
@@ -152,17 +219,13 @@ public class Scheduler {
 
     /**
      * Drone reports refill complete
+     *
+     * @param droneId The id of the drone that completed the refill
      */
     public synchronized void droneRefillComplete(int droneId) {
         System.out.println("Scheduler: Drone " + droneId + " refill complete, ready for missions");
         notifyAll(); // Wake up if it was waiting
     }
-
-
-
-
-
-
 
 
     /**

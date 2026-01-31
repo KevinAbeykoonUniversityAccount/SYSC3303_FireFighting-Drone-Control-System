@@ -10,14 +10,15 @@ public class DroneSubsystem extends Thread {
 
 
     private int droneId;
+    private DroneState droneState;
 
     private FireEvent currentMission;
     private int zoneId;
     private int xGridLocation;
     private int yGridLocation;
     private int waterRemaining;  // in Litres
+
     private Scheduler scheduler;
-    private DroneState droneState;
     private SimulationClock clock; // centralized clock
 
     public DroneSubsystem(int droneId, Scheduler scheduler){
@@ -53,83 +54,101 @@ public class DroneSubsystem extends Thread {
 
 
     /**
-     * Convert zone ID to coordinates (simplified)
+     * Returns the x coordinate of the fire incident based off zone
+     *
+     * @param zoneId The zone of target incident
+     * @return The x coordinate of the fire incident
      */
     private int getXFromZone(int zoneId) {
         // In iteration 1, the zones are hard coded areas, so return the center x coordinate of that zone.
         switch (zoneId){
-            case 1:
-                return 5;
-            case 2:
-                return 10;
-            case 3:
-                return 5;
-            case 4:
-                return 10;
-            default:
-                return 5;
+            case 1: return 7;    // Cells 0-14, center ~cell 7
+            case 2: return 22;   // Cells 15-29, center ~cell 22
+            case 3: return 7;    // Cells 0-14, center ~cell 7
+            case 4: return 22;   // Cells 15-29, center ~cell 22
+            default: return 7;
+
         }
     }
 
+    /**
+     * Returns the y coordinate of the fire incident based off zone
+     *
+     * @param zoneId The zone of target fire incident
+     * @return The y coordinate of the fire incident
+     */
     private int getYFromZone(int zoneId) {
         // In iteration 1, the zones are hard coded areas, so return the center x coordinate of that zone.
         switch (zoneId){
-            case 1:
-                return 5;
-            case 2:
-                return 10;
-            case 3:
-                return 5;
-            case 4:
-                return 10;
-            default:
-                return 5;
+            case 1: return 7;    // Center of Zone 1 (cells 0-14)
+            case 2: return 7;    // Center of Zone 2 (cells 0-14)
+            case 3: return 22;   // Center of Zone 3 (cells 15-29)
+            case 4: return 22;   // Center of Zone 4 (cells 15-29)
+            default: return 7;
         }
     }
 
-    // Update moveDrone to use simulation time
-    public void moveDrone(int targetX, int targetY) {
-        System.out.printf("Drone %d: Starting movement at simulation time %d%n",
-                droneId, clock.getSimulationTimeSeconds());
+    /**
+     * Moves the drone to the specified location
+     *
+     * @param targetX X coordinate of the destination
+     * @param targetY Y coordinate of the destination
+     * @throws InterruptedException
+     */
+    public void moveDrone(int targetX, int targetY) throws InterruptedException {
+        long startTime = clock.getSimulationTimeSeconds();
+        System.out.printf("Drone %d: Starting movement to (%d, %d) at simulation time %s%n",
+                droneId, targetX, targetY, clock.getFormattedTime());
+
+        setState(DroneState.ONROUTE);
 
         while (!((targetX == xGridLocation) && (targetY == yGridLocation))) {
+            // Move one cell at a time
             if (targetX > xGridLocation) xGridLocation++;
             if (targetX < xGridLocation) xGridLocation--;
             if (targetY > yGridLocation) yGridLocation++;
             if (targetY < yGridLocation) yGridLocation--;
 
-            // Simulate time passing for movement
-            try {
-                // Each grid movement takes 1 second of simulation time
-                Thread.sleep(1000); // Real 1 second = 1 simulation second
+            // Sleep for 1 simulation second for this movement
+            clock.sleepForSimulationSeconds(1);
 
-                System.out.printf("Drone %d: Moved to (%d, %d) at simulation time %d%n",
-                        droneId, xGridLocation, yGridLocation, clock.getSimulationTimeSeconds());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
+            //System.out.printf("Drone %d: Moved to (%d, %d) at simulation time %s%n", droneId, xGridLocation, yGridLocation, clock.getFormattedTime());
         }
+
+        System.out.printf("Drone %d: Arrived at destination (%d, %d) at simulation time %s%n",
+                droneId, targetX, targetY, clock.getFormattedTime());
         setState(DroneState.IDLE);
     }
 
+    /**
+     *
+     * @param waterNeeded The water needed for the fire incident assigned to drone
+     * @return The water utilized in extinguishing the fire.
+     * @throws InterruptedException
+     */
     public int extinguishFire(int waterNeeded) throws InterruptedException {
         int waterUsed = Math.min(waterRemaining, waterNeeded);
 
-        System.out.printf("Drone %d: Extinguishing fire (using %dL water)%n",
-                droneId, waterUsed);
+        System.out.printf("Drone %d: Starting extinguishing (using %dL water) at simulation time %s%n",
+                droneId, waterUsed, clock.getFormattedTime());
 
-        // Simulate extinguishing time: Change to our statistics, just doing 1L per second INCORRECT
-        Thread.sleep(waterUsed * 1000);
+        setState(DroneState.EXTINGUISHING);
 
-        System.out.printf("Drone %d: Done extinguishing%n", droneId);
+        // Sleep for waterUsed simulation seconds
+        clock.sleepForSimulationSeconds(waterUsed);
+
+        System.out.printf("Drone %d: Done extinguishing at simulation time %s%n",
+                droneId, clock.getFormattedTime());
+
         this.waterRemaining -= waterUsed;
+        setState(DroneState.IDLE);
         return waterUsed;
     }
 
-
     /**
-     * Go to refill station and refill
+     * Move drone to origin point (0,0) to refill on empty tank
+     *
+     * @throws InterruptedException
      */
     private void goForRefill() throws InterruptedException {
         setState(DroneState.REFILLING);
@@ -146,16 +165,32 @@ public class DroneSubsystem extends Thread {
         setState(DroneState.IDLE);
     }
 
-    public void refillWater() {
-        System.out.printf("Drone %d: Refilling water tank\n", droneId);
-        //Sleep for a bit
-        System.out.printf("Drone %d: Done refilling water tank\n", droneId);
+    /**
+     * Refill the drone with water up to maximum capacity
+     *
+     * @throws InterruptedException
+     */
+    public void refillWater() throws InterruptedException {
+        System.out.printf("Drone %d: Refilling water tank at simulation time %s%n",
+                droneId, clock.getFormattedTime());
+
+        // Refilling takes 5 simulation seconds
+        clock.sleepForSimulationSeconds(5);
+
+        System.out.printf("Drone %d: Done refilling water tank at simulation time %s%n",
+                droneId, clock.getFormattedTime());
         this.waterRemaining = 15;
         setState(DroneState.IDLE);
     }
 
+    /**
+     * Set the state of the drone
+     *
+     * @param droneState The new current state the drone is in
+     */
     public void setState(DroneState droneState) {this.droneState = droneState;}
 
+    @Override
     public void run() {
         System.out.println("Drone " + droneId + " starting operations...");
 
@@ -202,5 +237,4 @@ public class DroneSubsystem extends Thread {
             }
         }
     }
-
 }

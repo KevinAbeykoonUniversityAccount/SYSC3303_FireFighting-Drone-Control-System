@@ -26,7 +26,7 @@ public class DroneSwarmFrame extends JFrame {
         add(controlPanel, BorderLayout.SOUTH);
 
         // Set size and make visible
-        setSize(1000, 700);
+        setSize(1400, 900);
         setLocationRelativeTo(null); // Center on screen
 
         // Attach model to this view

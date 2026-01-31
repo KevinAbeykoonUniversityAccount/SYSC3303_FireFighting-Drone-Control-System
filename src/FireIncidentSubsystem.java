@@ -51,15 +51,13 @@ public class FireIncidentSubsystem implements Runnable {
                     int seconds = Integer.parseInt(timeParts[2]);
                     int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds;
 
-                    // Calculate wait time based on simulation clock
-                    long currentSimTime = clock.getSimulationTimeSeconds();
-                    System.out.println(currentSimTime);
-                    long timeToWait = eventTimeSeconds - currentSimTime;
+                    // Use the clock's sleep method to wait until event time
+                    if (eventTimeSeconds > clock.getSimulationTimeSeconds()) {
+                        System.out.printf("FireIncidentSubsystem: Event scheduled at %s, current sim time: %s, waiting...%n",
+                                String.format("%02d:%02d:%02d", hours, minutes, seconds),
+                                clock.getFormattedTime());
 
-                    if (timeToWait > 0) {
-                        System.out.printf("FireIncidentSubsystem: Event scheduled at %d:%02d:%02d, current sim time: %d, waiting %d seconds%n",
-                                hours, minutes, seconds, currentSimTime, timeToWait);
-                        Thread.sleep(timeToWait * 1000); // Convert to milliseconds
+                        clock.sleepUntilSimulationTime(eventTimeSeconds);
                     }
 
                     // Parse the other parameters of the fire outbreak
@@ -70,7 +68,8 @@ public class FireIncidentSubsystem implements Runnable {
                     // Create a new event object that represents the real-time fire incident
                     FireEvent event = new FireEvent(zoneId, eventType, severity, eventTimeSeconds);
 
-                    System.out.println("FireIncidentSubsystem Sending Event: " + event);
+                    System.out.printf("FireIncidentSubsystem [%s]: Sending Event: %s%n",
+                            clock.getFormattedTime(), event);
                     scheduler.receiveFireEvent(event);
                 }
                 catch (Exception e) {

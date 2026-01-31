@@ -6,8 +6,16 @@ public class Main {
             // Initialize centralized clock
             SimulationClock clock = SimulationClock.getInstance();
 
+            // Set the start time of simulated clock
+            clock.setSimulationStartTime(0, 0, 0);
+
+            // Set clock speed: 60 = 1 real second = 1 simulated minute
+            clock.setClockSpeedMultiplier(60);
+            Thread clockThread = new Thread(clock, "SimulationClock");
+            clockThread.start();
+
             // Create scheduler with number of drones
-            int numberOfDrones = 2;
+            int numberOfDrones = 1;
             Scheduler scheduler = new Scheduler(numberOfDrones);
 
             // Create and start drones threads
@@ -21,9 +29,8 @@ public class Main {
             Thread fireSubsystem = new Thread(new FireIncidentSubsystem(scheduler, inputFile), "FireSubsystem");
             fireSubsystem.start();
 
-            // Set simulation to start at a specific time and the tick speed to 4x
-            clock.setSimulationStartTime(0, 0, 0); // Start at 14:00:00
-            // clock.setClockSpeedMultiplier(1); NEED TO REDO, DOES NOT SPEED OR SLOW DOWN
+            DroneSwarmFrame gui = new DroneSwarmFrame(scheduler);
+            gui.setVisible(true);
         });
     }
 }
