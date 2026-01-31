@@ -10,6 +10,8 @@ public class FireEvent{
     private final int zoneId;
     private String eventType;
     private FireSeverity severity;
+    private final int initialWaterRequired;
+    private int waterRemaining;
     private int waterRequired;
     private int secondsFromStart;
     private long fireIncidentStartTime; // Real-time when simulation started
@@ -23,24 +25,26 @@ public class FireEvent{
         switch(severity.toUpperCase()){
             case "LOW":
                 this.severity = FireSeverity.LOW;
-                this.waterRequired = 10;
+                this.initialWaterRequired = 10;
                 break;
 
             case "MODERATE":
                 this.severity = FireSeverity.MODERATE;
-                this.waterRequired = 20;
+                this.initialWaterRequired = 20;
                 break;
 
             case "HIGH":
                 this.severity = FireSeverity.HIGH;
-                this.waterRequired = 30;
+                this.initialWaterRequired = 30;
                 break;
 
             default:
+                initialWaterRequired = 0;
                 break;
         }
-    }
 
+        waterRemaining = initialWaterRequired;
+    }
 
     public int getZoneId() {
         return zoneId;
@@ -66,6 +70,17 @@ public class FireEvent{
         return secondsFromStart;
     }
 
+    public int getWaterRemaining() { return waterRemaining;
+    }
+
+    public void waterUsed(int waterUsed) {
+        waterRemaining -= waterUsed;
+    }
+
+    public boolean isExtinguished() {
+        return waterRemaining <= 0;
+    }
+
     public long getFireStartTime() {
         return fireIncidentStartTime;
     }
@@ -73,6 +88,10 @@ public class FireEvent{
 
     @Override
     public String toString() {
-        return "Time: " + secondsFromStart + "s | Zone: " + zoneId + " | Type: " + eventType + " | Severity: " + severity;
+        return "Time: " + secondsFromStart
+                + "s | Zone: " + zoneId
+                + " | Type: " + eventType
+                + " | Severity: " + severity
+                + " | Water Needed: " + waterRemaining;
     }
 }
