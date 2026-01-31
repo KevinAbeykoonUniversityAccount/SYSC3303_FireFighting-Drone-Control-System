@@ -1,4 +1,10 @@
 import javax.swing.*;
+/**
+ * The Main class creates and starts the scheduler, drone, and 
+ * FireSubsytem thread. It also creates the GUI window.
+ *
+ * @author Aryan Kumar Singh (101299776)
+ */
 
 public class Main {
     public static void main(String[] args) {
