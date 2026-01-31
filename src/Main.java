@@ -23,7 +23,7 @@ public class Main {
 
             // Set simulation to start at a specific time and the tick speed to 4x
             clock.setSimulationStartTime(0, 0, 0); // Start at 14:00:00
-            // clock.setClockSpeedMultiplier(1); NEED TO REDO, DOES NOT SPEED OR SLOW DOWN
+            clock.setClockSpeedMultiplier(1);
         });
     }
 }

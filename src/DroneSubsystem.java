@@ -10,7 +10,6 @@ public class DroneSubsystem extends Thread {
 
 
     private int droneId;
-
     private FireEvent currentMission;
     private int zoneId;
     private int xGridLocation;
@@ -101,7 +100,7 @@ public class DroneSubsystem extends Thread {
             // Simulate time passing for movement
             try {
                 // Each grid movement takes 1 second of simulation time
-                Thread.sleep(1000); // Real 1 second = 1 simulation second
+                Thread.sleep(clock.scaleSimulatedToReal(1000)); // Real 1 second = 1 simulation second
 
                 System.out.printf("Drone %d: Moved to (%d, %d) at simulation time %d%n",
                         droneId, xGridLocation, yGridLocation, clock.getSimulationTimeSeconds());
@@ -120,7 +119,7 @@ public class DroneSubsystem extends Thread {
                 droneId, waterUsed);
 
         // Simulate extinguishing time: Change to our statistics, just doing 1L per second INCORRECT
-        Thread.sleep(waterUsed * 1000);
+        Thread.sleep(clock.scaleSimulatedToReal(waterUsed * 1000L));
 
         System.out.printf("Drone %d: Done extinguishing%n", droneId);
         this.waterRemaining -= waterUsed;
@@ -156,6 +155,7 @@ public class DroneSubsystem extends Thread {
 
     public void setState(DroneState droneState) {this.droneState = droneState;}
 
+    @Override
     public void run() {
         System.out.println("Drone " + droneId + " starting operations...");
 
@@ -193,7 +193,7 @@ public class DroneSubsystem extends Thread {
                     }
                 } else {
                     // No mission available, wait a bit
-                    Thread.sleep(1000);
+                    Thread.sleep(clock.scaleSimulatedToReal(1000));
                 }
 
             } catch (InterruptedException e) {

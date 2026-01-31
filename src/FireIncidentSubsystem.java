@@ -20,11 +20,7 @@ public class FireIncidentSubsystem implements Runnable {
 
     @Override
     public void run() {
-        long startTime = System.currentTimeMillis();
-        boolean isFirstLine = true; // Flag to skip header
-
         System.out.println("Starting FireIncidentSubsystem - Reading: " + inputFileName + "...\n\n");
-
 
         try (BufferedReader br = new BufferedReader(new FileReader(inputFileName))) {
             String line;
@@ -33,33 +29,19 @@ public class FireIncidentSubsystem implements Runnable {
                 //Ignore comments or empty lines
                 if (line.trim().isEmpty() || line.startsWith("#")) continue;
 
-                // Skip the header row
-                if (isFirstLine) {
-                    isFirstLine = false;
-                    continue;
-                }
-
                 try {
                     //Parse inputs (time, zone, type, severity)
-                    String[] parts = line.split("[,\\s]+");
-
-                    // Convert HH:MM:SS to seconds
-                    String timeStr = parts[0].trim();
-                    String[] timeParts = timeStr.split(":");
-                    int hours = Integer.parseInt(timeParts[0]);
-                    int minutes = Integer.parseInt(timeParts[1]);
-                    int seconds = Integer.parseInt(timeParts[2]);
-                    int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds;
+                    String[] parts = line.split(","); //Assuming CSV
+                    int eventTimeSeconds = Integer.parseInt(parts[0].trim());
 
                     // Calculate wait time based on simulation clock
                     long currentSimTime = clock.getSimulationTimeSeconds();
-                    System.out.println(currentSimTime);
-                    long timeToWait = eventTimeSeconds - currentSimTime;
+                    long simTimeToWait = eventTimeSeconds - currentSimTime;
 
-                    if (timeToWait > 0) {
-                        System.out.printf("FireIncidentSubsystem: Event scheduled at %d:%02d:%02d, current sim time: %d, waiting %d seconds%n",
-                                hours, minutes, seconds, currentSimTime, timeToWait);
-                        Thread.sleep(timeToWait * 1000); // Convert to milliseconds
+                    if (simTimeToWait > 0) {
+                        System.out.printf("FireIncidentSubsystem: Event scheduled at T = %d, current sim time: %d, waiting %d seconds%n",
+                                eventTimeSeconds, currentSimTime, simTimeToWait);
+                        Thread.sleep(clock.scaleSimulatedToReal(simTimeToWait * 1000)); //Convert to milliseconds
                     }
 
                     // Parse the other parameters of the fire outbreak
@@ -70,6 +52,7 @@ public class FireIncidentSubsystem implements Runnable {
                     // Create a new event object that represents the real-time fire incident
                     FireEvent event = new FireEvent(zoneId, eventType, severity, eventTimeSeconds);
 
+                    //Send event to scheduler
                     System.out.println("FireIncidentSubsystem Sending Event: " + event);
                     scheduler.receiveFireEvent(event);
                 }
