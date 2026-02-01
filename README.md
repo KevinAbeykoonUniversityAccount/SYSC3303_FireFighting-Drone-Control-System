@@ -54,6 +54,7 @@ This project simulates a **firefighting system using autonomous drones** coordin
 ## Authors
 1. Aryan Kumar Singh (101299776)
 - Worked on the implementation of all 9 classes including the GUI
+- Worked on the Javadoc documentation
 
 2. Kevin Abeykoon (101301971)
 - Worked on the implementation of Drone State, DroneSubsystem, FireEvent, and Scheduler
