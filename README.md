@@ -50,6 +50,8 @@ This project simulates a **firefighting system using autonomous drones** coordin
 2. Observe simulation output in the console
 3. Kill the threads manually after it has finished
 
+Ensure the csv event file is in the src folder.
+
 
 ## Authors
 1. Aryan Kumar Singh (101299776)
