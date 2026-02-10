@@ -2,6 +2,12 @@
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
+/**
+ * This StatusPanel class is the panel that contains the 
+ * log information about whats happening in a textual form.
+ *
+ * @author Aryan Kumar Singh (101299776)
+ */
 
 public class StatusPanel extends JPanel {
     private JTextArea statusArea;
