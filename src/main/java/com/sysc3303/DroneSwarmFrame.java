@@ -1,3 +1,5 @@
+package com.sysc3303;
+
 /**
  * The DroneSwarmFrame is the main class for the GUI representation of the 
  * simulation. It displays the zones, log, drone movement, fires, etc.

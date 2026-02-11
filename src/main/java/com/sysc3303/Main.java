@@ -1,3 +1,5 @@
+package com.sysc3303;
+
 import javax.swing.*;
 /**
  * The Main class creates and starts the scheduler, drone, and 

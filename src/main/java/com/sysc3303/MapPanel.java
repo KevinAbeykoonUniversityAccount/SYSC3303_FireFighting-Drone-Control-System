@@ -1,3 +1,5 @@
+package com.sysc3303;
+
 import javax.swing.*;
 import java.awt.*;
 import java.util.*;

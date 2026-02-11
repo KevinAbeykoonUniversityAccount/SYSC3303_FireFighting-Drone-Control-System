@@ -1,3 +1,5 @@
+package com.sysc3303;
+
 public class SimulationClock implements Runnable {
     private static SimulationClock instance;
     private long simulationStartTimeMillis; // Real-time when simulation started

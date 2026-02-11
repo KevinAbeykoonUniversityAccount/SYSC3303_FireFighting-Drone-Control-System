@@ -1,3 +1,5 @@
+package com.sysc3303;
+
 import java.awt.*;
 /**
  * The FireEvent class is the object that the sysytem uses

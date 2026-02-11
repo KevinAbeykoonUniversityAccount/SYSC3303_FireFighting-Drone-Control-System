@@ -1,3 +1,4 @@
+package com.sysc3303;
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;

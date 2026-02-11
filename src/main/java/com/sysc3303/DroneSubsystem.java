@@ -1,3 +1,5 @@
+package com.sysc3303;
+
 /**
  * The DroneSubsystem class runs on its own thread and represents a single
  * drone. When the drone is IDLE, it requests a mission from the Scheduler.
