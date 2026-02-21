@@ -5,7 +5,7 @@ public class SimulationClock implements Runnable {
     private int clockSpeedMultiplier; // How many simulation seconds pass per real second
     private boolean running;
 
-    private SimulationClock() {
+    public SimulationClock() {
         // Private constructor for singleton
         simulationStartTimeMillis = System.currentTimeMillis();
         simulationTimeSeconds = 0;
