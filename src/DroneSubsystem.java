@@ -18,13 +18,12 @@ public class DroneSubsystem extends Thread {
         EXTINGUISHING,
         REFILLING,
         FAULTED,
-        DECOMISSIONED
+        DECOMMISSIONED
     }
 
 
     private int droneId;
     private DroneState droneState;
-
     private FireEvent currentMission;
     private int zoneId;
     private int xGridLocation;
@@ -203,51 +202,88 @@ public class DroneSubsystem extends Thread {
      */
     public void setState(DroneState droneState) {this.droneState = droneState;}
 
+    /**
+     * Get the current mission of the drone
+     *
+     * @return The fire the drone is assigned to go to
+     */
+    public FireEvent getCurrentMission() {
+        return currentMission;
+    }
+
     @Override
     public void run() {
         System.out.println("Drone " + droneId + " starting operations...");
 
-        while (droneState != DroneState.DECOMISSIONED) {
+        boolean decommissioned = false;
+
+        while (!decommissioned) {
             try {
-                // 1. Request mission from scheduler, will wait until one is available
-                FireEvent mission = scheduler.requestMission(droneId);
+                switch(droneState){
+                    case IDLE:
+                        // 1. Request mission from scheduler, will wait until one is available
+                        FireEvent mission = scheduler.requestMission(droneId);
 
-                if (mission != null) {
-                    currentMission = mission;
+                        if (mission != null) {
+                            this.currentMission = mission;
 
-                    // 2. Move to fire location (convert zoneId to coordinates)
-                    int targetX = getXFromZone(mission.getZoneId());
-                    int targetY = getYFromZone(mission.getZoneId());
+                            setState(DroneState.ONROUTE);
+                        }
+                        break;
 
-                    setState(DroneState.ONROUTE);
-                    System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
-                            droneId, mission.getZoneId(), targetX, targetY);
+                    case ONROUTE:
+                        // 2. Move to fire location (convert zoneId to coordinates)
+                        FireEvent current_mission = this.getCurrentMission();
+                        int targetX = getXFromZone(current_mission.getZoneId());
+                        int targetY = getYFromZone(current_mission.getZoneId());
 
-                    moveDrone(targetX, targetY);
+                        System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
+                                droneId, current_mission.getZoneId(), targetX, targetY);
+                        moveDrone(targetX, targetY);
 
-                    // The drone then extinguishes the fire once reaching the location
-                    setState(DroneState.EXTINGUISHING);
-                    int waterNeeded = Math.min(mission.getWaterRemaining(), 15); // Max drone capacity
-                    int waterUsed = extinguishFire(waterNeeded);
+                        break;
 
-                    // 4. Report completion
-                    scheduler.missionCompleted(droneId, mission.getZoneId(), waterUsed);
-                    currentMission = null;
 
-                    // 5. Check if drone needs refill
-                    if (waterRemaining <= 0) { // Empty tank
-                        System.out.println("Drone " + droneId + " water low, going to refill");
+                    case EXTINGUISHING:
+                        // Drop agent on the fire
+                        int waterNeeded = currentMission.getWaterRemaining();
+                        int waterUsed = extinguishFire(waterNeeded);
+
+                        // Report completion to scheduler
+                        scheduler.missionCompleted(droneId, currentMission.getZoneId(), waterUsed);
+                        currentMission = null;
+
+                        // Decide next state based on remaining water
+                        if (waterRemaining <= 0) {
+                            droneState = DroneState.REFILLING;
+                        } else {
+                            droneState = DroneState.IDLE;
+                        }
+                        break;
+
+                    case REFILLING:
+                        // Go to base and refill (method sets state to IDLE when done)
                         goForRefill();
-                    }
-                } else {
-                    // No mission available, wait a bit
-                    Thread.sleep(1000);
-                }
+                        break;
 
+                    case FAULTED:
+                        // Placeholder for fault handling (to be expanded in later iterations)
+                        System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
+                        Thread.sleep(1000);
+                        // For now, just go back to idle (actual fault logic will be added later)
+                        droneState = DroneState.IDLE;
+                        break;
+
+                    case DECOMMISSIONED:
+                        decommissioned = true;
+                        System.out.printf("Drone %d is decommissioned.%n", droneId);
+                        break;
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             }
+
         }
     }
 }
