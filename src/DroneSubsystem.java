@@ -211,79 +211,78 @@ public class DroneSubsystem extends Thread {
         return currentMission;
     }
 
+    public void performAction() {
+        try {
+            switch(droneState){
+                case IDLE:
+                    // 1. Request mission from scheduler, will wait until one is available
+                    FireEvent mission = scheduler.requestMission(droneId);
+
+                    if (mission != null) {
+                        this.currentMission = mission;
+
+                        setState(DroneState.ONROUTE);
+                    }
+                    break;
+
+                case ONROUTE:
+                    // 2. Move to fire location (convert zoneId to coordinates)
+                    FireEvent current_mission = this.getCurrentMission();
+                    int targetX = getXFromZone(current_mission.getZoneId());
+                    int targetY = getYFromZone(current_mission.getZoneId());
+
+                    System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
+                            droneId, current_mission.getZoneId(), targetX, targetY);
+                    moveDrone(targetX, targetY);
+                    setState(DroneState.EXTINGUISHING);
+                    break;
+
+
+                case EXTINGUISHING:
+                    // Drop agent on the fire
+                    int waterNeeded = currentMission.getWaterRemaining();
+                    int waterUsed = extinguishFire(waterNeeded);
+
+                    // Report completion to scheduler
+                    scheduler.missionCompleted(droneId, currentMission.getZoneId(), waterUsed);
+                    currentMission = null;
+
+                    // Decide next state based on remaining water
+                    if (waterRemaining <= 0) {
+                        droneState = DroneState.REFILLING;
+                    } else {
+                        droneState = DroneState.IDLE;
+                    }
+                    break;
+
+                case REFILLING:
+                    // Go to base and refill (method sets state to IDLE when done)
+                    goForRefill();
+                    break;
+
+                case FAULTED:
+                    // Placeholder for fault handling (to be expanded in later iterations)
+                    System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
+                    Thread.sleep(1000);
+                    // For now, just go back to idle (actual fault logic will be added later)
+                    droneState = DroneState.IDLE;
+                    break;
+
+                case DECOMMISSIONED:
+                    System.out.printf("Drone %d is decommissioned.%n", droneId);
+                    break;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     @Override
     public void run() {
         System.out.println("Drone " + droneId + " starting operations...");
 
-        boolean decommissioned = false;
-
-        while (!decommissioned) {
-            try {
-                switch(droneState){
-                    case IDLE:
-                        // 1. Request mission from scheduler, will wait until one is available
-                        FireEvent mission = scheduler.requestMission(droneId);
-
-                        if (mission != null) {
-                            this.currentMission = mission;
-
-                            setState(DroneState.ONROUTE);
-                        }
-                        break;
-
-                    case ONROUTE:
-                        // 2. Move to fire location (convert zoneId to coordinates)
-                        FireEvent current_mission = this.getCurrentMission();
-                        int targetX = getXFromZone(current_mission.getZoneId());
-                        int targetY = getYFromZone(current_mission.getZoneId());
-
-                        System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
-                                droneId, current_mission.getZoneId(), targetX, targetY);
-                        moveDrone(targetX, targetY);
-
-                        break;
-
-
-                    case EXTINGUISHING:
-                        // Drop agent on the fire
-                        int waterNeeded = currentMission.getWaterRemaining();
-                        int waterUsed = extinguishFire(waterNeeded);
-
-                        // Report completion to scheduler
-                        scheduler.missionCompleted(droneId, currentMission.getZoneId(), waterUsed);
-                        currentMission = null;
-
-                        // Decide next state based on remaining water
-                        if (waterRemaining <= 0) {
-                            droneState = DroneState.REFILLING;
-                        } else {
-                            droneState = DroneState.IDLE;
-                        }
-                        break;
-
-                    case REFILLING:
-                        // Go to base and refill (method sets state to IDLE when done)
-                        goForRefill();
-                        break;
-
-                    case FAULTED:
-                        // Placeholder for fault handling (to be expanded in later iterations)
-                        System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
-                        Thread.sleep(1000);
-                        // For now, just go back to idle (actual fault logic will be added later)
-                        droneState = DroneState.IDLE;
-                        break;
-
-                    case DECOMMISSIONED:
-                        decommissioned = true;
-                        System.out.printf("Drone %d is decommissioned.%n", droneId);
-                        break;
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-
+        while (droneState != DroneState.DECOMMISSIONED) {
+            performAction();
         }
     }
 }
