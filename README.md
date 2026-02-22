@@ -87,9 +87,16 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   - Worked on some Javadoc documentation
    
 ### 3. Rayyan Kashif (101274266)
-- Worked on the implementation of FireEventSubsystem
-- Worked on UML Class Diagrams
+  #### Iteration 1
+  - Worked on the implementation of FireEventSubsystem
+  - Worked on UML Class Diagrams
+  #### Iteration 2, 3, & 4
+  Rest in Piece
   
 ### 4. Abdullah Khan (101305235)
-- Worked on the implementation of DroneSubsystem
-- Worked on UML Sequence Diagrams
+  #### Iteration 1
+  - Worked on the implementation of DroneSubsystem
+  - Worked on UML Sequence Diagrams
+  #### Iteration 2
+  - Worked on DroneSubsystem Tests (for both iterations)
+  - Made State Machine Diagram for DroneSubSystem
