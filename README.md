@@ -76,8 +76,15 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   - Worked on some Javadoc documentation
     
 ### 2. Kevin Abeykoon (101301971)
+  #### Iteration 1
 - Worked on the implementation of Drone State, DroneSubsystem, FireEvent, and Scheduler
 - Worked on Javadoc documentation for all classes and README
+  #### Iteration 2
+  - Wrote the Scheduler tests
+  - Created the Sequence diagram depicting how the GUI retrieves data and redisplays, aswell as the general flow of the simulation
+  - Since I did most of the Scheduler work for this iteration during the last iteration, there was not much more to do
+  - In the last iteration, I created a multiple drone scheduling queue with "logic" as per the project specifications
+  - Worked on some Javadoc documentation
    
 ### 3. Rayyan Kashif (101274266)
 - Worked on the implementation of FireEventSubsystem
