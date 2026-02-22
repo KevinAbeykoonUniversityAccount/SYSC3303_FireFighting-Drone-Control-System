@@ -14,6 +14,7 @@ public class DroneSubSystemTest2 {
         fireEvent = new FireEvent(0, "TestEvent", "HIGH", 0);
         scheduler.receiveFireEvent(fireEvent);
         droneSubsystem = new DroneSubsystem(0, scheduler);
+        scheduler.registerDrone(droneSubsystem);
     }
 
     @Test

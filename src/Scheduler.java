@@ -15,6 +15,8 @@ public class Scheduler {
     private Deque<FireEvent> highFireEventQueue; // Queue of fire events
     private Map<Integer, DroneSubsystem> droneStates;  // List of drones and their states
 
+    private Map<Integer, Integer> assignedWaterPerZone = new HashMap<>();
+
     private final SimulationClock clock;
 
 
@@ -29,12 +31,20 @@ public class Scheduler {
         moderateFireEventQueue = new LinkedList<>();
         highFireEventQueue = new LinkedList<>();
 
-        for(int i = 0; i < numberOfDrones; i++){
-            droneStates.put(i, new DroneSubsystem(i, this));
-        }
-
         this.clock = SimulationClock.getInstance();
     }
+
+    /**
+     * Register a drone with the scheduler
+     *
+     * @param drone registered to this fire event scheduling system
+     */
+    public synchronized void registerDrone(DroneSubsystem drone) {
+        droneStates.put(drone.getDroneId(), drone);
+        System.out.println("Scheduler: Drone " + drone.getDroneId() + " registered");
+    }
+
+
 
     /**
      * The Fire Subsystem uses this method to send
@@ -57,6 +67,11 @@ public class Scheduler {
         notifyAll(); // Wake up drone threads that are waiting
     }
 
+    /**
+     * Returns the fire incident with the current highest priority to assign to a drone
+     *
+     * @return fire with highest priority
+     */
     private FireEvent retrieveHighestPriorityEvent(){
         if(!highFireEventQueue.isEmpty()){
             return highFireEventQueue.pollFirst();
@@ -71,6 +86,12 @@ public class Scheduler {
         return null;
     }
 
+    /**
+     * Adds fire incidents who were not fully extingusihed back into their respective
+     * severity queue.
+     *
+     * @return fire event that needs to be readded to queue
+     */
     public synchronized void rescheduleUnfinishedFireEvent(FireEvent event){
         if(event.getSeverity() == FireEvent.FireSeverity.HIGH){
             highFireEventQueue.addFirst(event);
@@ -86,53 +107,6 @@ public class Scheduler {
     }
 
     /**
-     * Sorts the fire incident algorithm based on which fire has the highest priority at head
-     *
-     * @return Sorted queue with next job placed at front
-     */
-    /*public synchronized Queue<FireEvent> sortFireEventsQueue(){
-        // Convert queue to list for sorting
-        List<FireEvent> events = new ArrayList<>(fireEventQueue);
-
-        // Sort using custom comparator
-        events.sort(new Comparator<FireEvent>() {
-            @Override
-            public int compare(FireEvent e1, FireEvent e2) {
-                // 1. Compare by severity (HIGH > MODERATE > LOW)
-                int severityCompare = Integer.compare(
-                        getSeverityPriority(e2.getSeverity()),
-                        getSeverityPriority(e1.getSeverity())
-                );
-
-                if (severityCompare != 0) {
-                    return severityCompare; // Different severity, sort by severity
-                }
-
-                // 2. Same severity: compare by waiting time (longer waiting = higher priority)
-                long waitTime1 = clock.getSimulationTimeSeconds() - e1.getFireStartTime();
-                long waitTime2 = clock.getSimulationTimeSeconds() - e2.getFireStartTime();
-
-                return Long.compare(waitTime2, waitTime1); // Longer waiting first
-            }
-
-            private int getSeverityPriority(FireEvent.FireSeverity severity) {
-                switch (severity) {
-                    case HIGH: return 3;
-                    case MODERATE: return 2;
-                    case LOW: return 1;
-                    default: return 0;
-                }
-            }
-        });
-
-        // Clear and re-add sorted events
-        fireEventQueue.clear();
-        fireEventQueue.addAll(events);
-
-        return this.fireEventQueue;
-    } */
-
-    /**
      * The drone waits for a mission to combat a fire incident if available,
      * then the scheduler assigns one from the queue
      *
@@ -144,7 +118,8 @@ public class Scheduler {
         // Check drone water
         if (drone.getWaterRemaining() <= 0) {
             drone.setState(DroneSubsystem.DroneState.REFILLING);
-            drone.moveDrone(100, 100);  //Assuming refilling base is 0, 0
+            // Drone will handle refilling; we don't assign mission now
+            return null;
         }
 
         // Wait for work if queue is empty
@@ -156,53 +131,36 @@ public class Scheduler {
                 Thread.currentThread().interrupt();
                 return null;
             }
-
             mission = retrieveHighestPriorityEvent();
         }
 
-        // Sort the queue before assigning missions
-        // sortFireEventsQueue();
-        // FireEvent mission = fireEventQueue.poll();
-
         int droneCapacity = drone.getWaterRemaining();
         int waterNeeded = mission.getWaterRemaining();
-
-        if (droneCapacity <= 0) {
-            return null;
-        }
-
-        // Calculate how much water this drone can handle
         int waterToAssign = Math.min(droneCapacity, waterNeeded);
-
-        // Create a COPY of the event with REDUCED water requirement
         int remainingWater = waterNeeded - waterToAssign;
 
+        // Add assigned water to per‑zone tracking
+        assignedWaterPerZone.merge(mission.getZoneId(), waterToAssign, Integer::sum);
+
+        FireEvent droneMission;
         if (remainingWater > 0) {
-            // Reschedule event to the front of the appropriate queue
+            // Create a copy for the drone with exactly the assigned water
+            droneMission = new FireEvent(mission, waterToAssign);
+            // Reduce original event and put it back at the front of the queue
             mission.waterUsed(waterToAssign);
             rescheduleUnfinishedFireEvent(mission);
-
             System.out.printf("Scheduler [%s]: Drone %d assigned PARTIAL mission to Zone %d (Severity: %s, Water: %dL, Remaining: %dL)%n%n",
                     clock.getFormattedTime(), droneId, mission.getZoneId(),
                     mission.getSeverity(), waterToAssign, remainingWater);
         } else {
-            // No water remaining, just poll the original
+            // Full assignment – use the original event (it will be removed from queue)
+            droneMission = mission;
             System.out.printf("Scheduler [%s]: Drone %d assigned FULL mission to Zone %d (Severity: %s, Water: %dL)%n%n",
                     clock.getFormattedTime(), droneId, mission.getZoneId(),
                     mission.getSeverity(), waterToAssign);
         }
 
-
-        // Create mission for drone with the water it will use
-       /* FireEvent droneMission = new FireEvent(
-                originalMission.getZoneId(),
-                originalMission.getEventType(),
-                originalMission.getSeverity().toString(),
-                (int)originalMission.getFireStartTime()
-        );
-        droneMission.setWaterRequired(waterToAssign);*/
-
-        return mission; // Return mission for drone
+        return droneMission;
     }
 
     /**
@@ -225,18 +183,12 @@ public class Scheduler {
         // Check if this zone still has fire events in queue
         boolean zoneStillHasFire = false;
 
-        /*for (FireEvent event : fireEventQueue) {
-            if (event.getZoneId() == zoneId && event.getWaterRequired() > 0) {
-                zoneStillHasFire = true;
-                System.out.printf("Scheduler: Zone %d still needs %dL more water%n",
-                        zoneId, event.getWaterRequired());
-                break;
-            }
-        }*/
-
         if (!zoneStillHasFire) {
             notifyFireSubsystem(zoneId);
         }
+
+        // Remove or reduce the assigned water for this zone
+        assignedWaterPerZone.computeIfPresent(zoneId, (k, v) -> (v - waterUsed <= 0) ? null : v - waterUsed);
 
         // Notify waiting drones looking for work
         notifyAll();
@@ -272,4 +224,52 @@ public class Scheduler {
     }
 
 
+
+    /**
+     * Returns an unmodifiable view of the drone states map.
+     */
+    public synchronized Map<Integer, DroneSubsystem> getDroneStates() {
+        return Collections.unmodifiableMap(droneStates);
+    }
+
+    /**
+     * Returns the number of active fires by severity: [high, moderate, low]
+     */
+    public synchronized int[] getFireCountsBySeverity() {
+        int high = highFireEventQueue != null ? highFireEventQueue.size() : 0;
+        int moderate = moderateFireEventQueue != null ? moderateFireEventQueue.size() : 0;
+        int low = lowFireEventQueue != null ? lowFireEventQueue.size() : 0;
+
+        // Add drones currently on a mission
+        for (DroneSubsystem drone : droneStates.values()) {
+            FireEvent mission = drone.getCurrentMission();
+            if (mission != null) {
+                switch (mission.getSeverity()) {
+                    case HIGH:    high++; break;
+                    case MODERATE: moderate++; break;
+                    case LOW:     low++; break;
+                }
+            }
+        }
+        return new int[]{high, moderate, low};
+    }
+
+    /**
+     * Returns a map from zone ID to the total remaining water needed
+     */
+    public synchronized Map<Integer, Integer> getActiveFiresPerZone() {
+        Map<Integer, Integer> total = new HashMap<>();
+        // Add water from queues
+        for (FireEvent e : highFireEventQueue)
+            total.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (FireEvent e : moderateFireEventQueue)
+            total.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (FireEvent e : lowFireEventQueue)
+            total.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        // Add water currently assigned to drones
+        for (Map.Entry<Integer, Integer> e : assignedWaterPerZone.entrySet()) {
+            total.merge(e.getKey(), e.getValue(), Integer::sum);
+        }
+        return total;
+    }
 }

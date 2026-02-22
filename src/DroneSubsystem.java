@@ -21,6 +21,11 @@ public class DroneSubsystem extends Thread {
         DECOMMISSIONED
     }
 
+    // Realistic drone parameters from Iteration 0
+    private static final double NOZZLE_OPEN_TIME = 0.75; // seconds
+    private static final double NOZZLE_CLOSE_TIME = 0.75; // seconds
+    private static final double FLOW_RATE = 3.77; // litres per second
+    private static final int MAX_CAPACITY = 15; // litres
 
     private int droneId;
     private DroneState droneState;
@@ -39,7 +44,7 @@ public class DroneSubsystem extends Thread {
         yGridLocation = 0;
         zoneId = 0;
         droneState = DroneState.IDLE;
-        waterRemaining = 15;
+        waterRemaining = MAX_CAPACITY;
         this.scheduler = scheduler;
         this.clock = SimulationClock.getInstance();
     }
@@ -50,8 +55,52 @@ public class DroneSubsystem extends Thread {
         this.yGridLocation = yGridLocation;
         this.zoneId = zoneId;
         this.droneState = droneState;
-        this.waterRemaining = 15;
+        this.waterRemaining = MAX_CAPACITY;
         this.scheduler = scheduler;
+    }
+
+    /**
+     * Return the current x coordinate of the drone relative to the grid map
+     *
+     * @return current x position of drone
+     */
+    public int getX() {return this.xGridLocation;}
+
+    /**
+     * Return the current y coordinate of the drone relative to the grid map
+     *
+     * @return current y position of drone
+     */
+    public int getY() {return this.yGridLocation;}
+
+    /**
+     * Return the water remaining in the drone's tank
+     *
+     * @return current water volume (litres) in drone tank
+     */
+    public int getWaterRemaining() {return this.waterRemaining;}
+
+    /**
+     * Return the current state of the drone
+     *
+     * @return state of the drone
+     */
+    public DroneState getDroneState() {return this.droneState;}
+
+    /**
+     * Return the drone's number identification
+     *
+     * @return id of drone
+     */
+    public Integer getDroneId() { return this.droneId; }
+
+    /**
+     * Get the current mission of the drone
+     *
+     * @return The fire the drone is assigned to go to
+     */
+    public FireEvent getCurrentMission() {
+        return currentMission;
     }
 
     public void setMissionCoordinates(int xPos, int yPos){
@@ -59,11 +108,9 @@ public class DroneSubsystem extends Thread {
         this.yGridLocation = yPos;
     }
 
-    public int getX() {return this.xGridLocation;}
-    public int getY() {return this.yGridLocation;}
-    public int getWaterRemaining() {return this.waterRemaining;}
-    public DroneState getDroneState() {return this.droneState;}
-
+    public void setCurrentMission(FireEvent currentMission){
+        this.currentMission = currentMission;
+    }
 
     /**
      * Returns the x coordinate of the fire incident based off zone
@@ -112,8 +159,6 @@ public class DroneSubsystem extends Thread {
         System.out.printf("Drone %d: Starting movement to (%d, %d) at simulation time %s%n",
                 droneId, targetX, targetY, clock.getFormattedTime());
 
-        setState(DroneState.ONROUTE);
-
         while (!((targetX == xGridLocation) && (targetY == yGridLocation))) {
             // Move one cell at a time
             if (targetX > xGridLocation) xGridLocation++;
@@ -129,8 +174,8 @@ public class DroneSubsystem extends Thread {
 
         System.out.printf("Drone %d: Arrived at destination (%d, %d) at simulation time %s%n",
                 droneId, targetX, targetY, clock.getFormattedTime());
-        setState(DroneState.IDLE);
     }
+
 
     /**
      *
@@ -139,22 +184,40 @@ public class DroneSubsystem extends Thread {
      * @throws InterruptedException
      */
     public int extinguishFire(int waterNeeded) throws InterruptedException {
-        int waterUsed = Math.min(waterRemaining, waterNeeded);
+        int waterToDrop = Math.min(waterRemaining, waterNeeded);
 
-        System.out.printf("Drone %d: Starting extinguishing (using %dL water) at simulation time %s%n",
-                droneId, waterUsed, clock.getFormattedTime());
+        if (waterToDrop <= 0) {
+            System.out.printf("Drone %d: No water to drop%n", droneId);
+            return 0;
+        }
 
-        setState(DroneState.EXTINGUISHING);
+        System.out.printf("Drone %d: Starting extinguishing sequence for %dL water%n",
+                droneId, waterToDrop);
+        System.out.printf("Drone %d: Opening nozzle (%.2fs)%n", droneId, NOZZLE_OPEN_TIME);
 
-        // Sleep for waterUsed simulation seconds
-        clock.sleepForSimulationSeconds(waterUsed);
+        // Step 1: Open nozzle
+        clock.sleepForSimulationSeconds((long)(NOZZLE_OPEN_TIME));
 
-        System.out.printf("Drone %d: Done extinguishing at simulation time %s%n",
-                droneId, clock.getFormattedTime());
+        // Step 2: Drop water at flow rate
+        double flowTime = waterToDrop / FLOW_RATE;
+        System.out.printf("Drone %d: Dropping water at %.2f L/s for %.2fs%n",
+                droneId, FLOW_RATE, flowTime);
 
-        this.waterRemaining -= waterUsed;
-        setState(DroneState.IDLE);
-        return waterUsed;
+        // Simulate dropping water - we can break this into smaller chunks for realism
+        long flowTimeMillis = (long)(flowTime * 1000);
+        long startTime = System.currentTimeMillis();        // Simulate the water dropping process
+        clock.sleepForSimulationSeconds((long)(flowTime));
+
+        // Step 3: Close nozzle
+        System.out.printf("Drone %d: Closing nozzle (%.2fs)%n", droneId, NOZZLE_CLOSE_TIME);
+        clock.sleepForSimulationSeconds((long)(NOZZLE_CLOSE_TIME));
+
+        double totalTime = NOZZLE_OPEN_TIME + flowTime + NOZZLE_CLOSE_TIME;
+        System.out.printf("Drone %d: Extinguishing complete (total time: %.2fs)%n",
+                droneId, totalTime);
+
+        this.waterRemaining -= waterToDrop;
+        return waterToDrop;
     }
 
     /**
@@ -202,18 +265,11 @@ public class DroneSubsystem extends Thread {
      */
     public void setState(DroneState droneState) {this.droneState = droneState;}
 
-    /**
-     * Get the current mission of the drone
-     *
-     * @return The fire the drone is assigned to go to
-     */
-    public FireEvent getCurrentMission() {
-        return currentMission;
-    }
+
 
     public void performAction() {
         try {
-            switch(droneState){
+            switch (droneState) {
                 case IDLE:
                     // 1. Request mission from scheduler, will wait until one is available
                     FireEvent mission = scheduler.requestMission(droneId);
@@ -227,16 +283,22 @@ public class DroneSubsystem extends Thread {
 
                 case ONROUTE:
                     // 2. Move to fire location (convert zoneId to coordinates)
-                    FireEvent current_mission = this.getCurrentMission();
-                    int targetX = getXFromZone(current_mission.getZoneId());
-                    int targetY = getYFromZone(current_mission.getZoneId());
+                    if (currentMission != null) {
+                        int targetX = getXFromZone(currentMission.getZoneId());
+                        int targetY = getYFromZone(currentMission.getZoneId());
 
-                    System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
-                            droneId, current_mission.getZoneId(), targetX, targetY);
-                    moveDrone(targetX, targetY);
-                    setState(DroneState.EXTINGUISHING);
+                        System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
+                                droneId, currentMission.getZoneId(), targetX, targetY);
+
+                        moveDrone(targetX, targetY);
+
+                        // After moving, transition to extinguishing
+                        setState(DroneState.EXTINGUISHING);
+                    } else {
+                        // No mission, go back to idle
+                        setState(DroneState.IDLE);
+                    }
                     break;
-
 
                 case EXTINGUISHING:
                     // Drop agent on the fire
@@ -272,6 +334,9 @@ public class DroneSubsystem extends Thread {
                     System.out.printf("Drone %d is decommissioned.%n", droneId);
                     break;
             }
+
+            Thread.sleep(10);
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -285,4 +350,6 @@ public class DroneSubsystem extends Thread {
             performAction();
         }
     }
+
+
 }
