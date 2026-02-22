@@ -9,32 +9,51 @@ import java.util.*;
  * @author Kevin Abeykoon (101301971)
  * @author Aryan Kumar Singh (101299776)
  */
-public class Scheduler {
-    private Deque<FireEvent> lowFireEventQueue; // Queue of fire events
-    private Deque<FireEvent> moderateFireEventQueue; // Queue of fire events
-    private Deque<FireEvent> highFireEventQueue; // Queue of fire events
-    private Map<Integer, DroneSubsystem> droneStates;  // List of drones and their states
+import java.util.*;
 
+/**
+ * The Scheduler class is the central program of the fire fighting
+ * control system. It is responsible for receiving fire events,
+ * scheduling drones to put out fires, and reporting back that
+ * the fire has been put out.
+ *
+ * This version includes a state machine to model the scheduler's behaviour.
+ *
+ * @author Kevin Abeykoon (101301971)
+ * @author Aryan Kumar Singh (101299776)
+ */
+public class Scheduler {
+    public enum SchedulerState {
+        IDLE,               // No active fires, all drones idle
+        DISPATCHING,        // Fires in queue, selecting drones
+        MONITORING,         // At least one drone on a mission
+        REFILLING,          // One or more drones are refilling
+        FAULT_HANDLING      // Handling a drone fault
+    }
+
+    private Deque<FireEvent> lowFireEventQueue;
+    private Deque<FireEvent> moderateFireEventQueue;
+    private Deque<FireEvent> highFireEventQueue;
+    private Map<Integer, DroneSubsystem> droneStates;
     private Map<Integer, Integer> assignedWaterPerZone = new HashMap<>();
 
     private final SimulationClock clock;
 
+    // State machine fields
+    private SchedulerState currentState = SchedulerState.IDLE;
+    private int activeMissionCount = 0;          // drones currently on a mission
+    private int refillingCount = 0;               // drones currently refilling
 
     /**
      * Constructor to create a variable amount of
      * drones, starting in the IDLE state.
-     * @param numberOfDrones number of drones to create
+     * @param numberOfDrones number of drones to create (unused, drones are registered separately)
      */
     public Scheduler(int numberOfDrones){
         droneStates = new HashMap<>();
         lowFireEventQueue = new LinkedList<>();
         moderateFireEventQueue = new LinkedList<>();
         highFireEventQueue = new LinkedList<>();
-
-        /*for(int i = 0; i < numberOfDrones; i++){
-            droneStates.put(i, new DroneSubsystem(i, this));
-        }*/
-
         this.clock = SimulationClock.getInstance();
     }
 
@@ -46,11 +65,8 @@ public class Scheduler {
         System.out.println("Scheduler: Drone " + drone.getDroneId() + " registered");
     }
 
-
-
     /**
-     * The Fire Subsystem uses this method to send
-     * a fire event to the scheduler.
+     * The Fire Subsystem uses this method to send a fire event to the scheduler.
      *
      * @param event fire event sent by fire incident subsystem
      */
@@ -66,6 +82,11 @@ public class Scheduler {
             lowFireEventQueue.add(event);
         }
 
+        // If we were idle, now we have work to do
+        if (currentState == SchedulerState.IDLE) {
+            currentState = SchedulerState.DISPATCHING;
+        }
+
         notifyAll(); // Wake up drone threads that are waiting
     }
 
@@ -79,7 +100,6 @@ public class Scheduler {
         else if(!lowFireEventQueue.isEmpty()){
             return lowFireEventQueue.pollFirst();
         }
-
         return null;
     }
 
@@ -93,7 +113,6 @@ public class Scheduler {
         else{
             lowFireEventQueue.addFirst(event);
         }
-
         notifyAll();
     }
 
@@ -102,6 +121,7 @@ public class Scheduler {
      * then the scheduler assigns one from the queue
      *
      * @param droneId ID of drone
+     * @return a FireEvent for the drone to execute, or null if none available
      */
     public synchronized FireEvent requestMission(int droneId) throws InterruptedException {
         DroneSubsystem drone = droneStates.get(droneId);
@@ -109,7 +129,8 @@ public class Scheduler {
         // Check drone water
         if (drone.getWaterRemaining() <= 0) {
             drone.setState(DroneSubsystem.DroneState.REFILLING);
-            // Drone will handle refilling; we don't assign mission now
+            refillingCount++;
+            currentState = SchedulerState.REFILLING;
             return null;
         }
 
@@ -117,7 +138,7 @@ public class Scheduler {
         FireEvent mission = retrieveHighestPriorityEvent();
         while (mission == null) {
             try {
-                wait(); // Drone waits for work
+                wait();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return null;
@@ -144,11 +165,27 @@ public class Scheduler {
                     clock.getFormattedTime(), droneId, mission.getZoneId(),
                     mission.getSeverity(), waterToAssign, remainingWater);
         } else {
-            // Full assignment – use the original event (it will be removed from queue)
+            // Full assignment – use the original event
             droneMission = mission;
             System.out.printf("Scheduler [%s]: Drone %d assigned FULL mission to Zone %d (Severity: %s, Water: %dL)%n%n",
                     clock.getFormattedTime(), droneId, mission.getZoneId(),
                     mission.getSeverity(), waterToAssign);
+        }
+
+        activeMissionCount++;
+
+        // Update scheduler state based on remaining work
+        if (remainingWater > 0) {
+            // There is still a fire in the queue, so we remain in DISPATCHING
+            currentState = SchedulerState.DISPATCHING;
+        } else {
+            // No pending fires in the queue? Check queues
+            if (highFireEventQueue.isEmpty() && moderateFireEventQueue.isEmpty() && lowFireEventQueue.isEmpty()) {
+                // All fires have been assigned, now monitoring active missions
+                currentState = SchedulerState.MONITORING;
+            } else {
+                currentState = SchedulerState.DISPATCHING;
+            }
         }
 
         return droneMission;
@@ -160,9 +197,9 @@ public class Scheduler {
      *
      * @param droneId ID of drone
      * @param zoneId ID of zone
+     * @param waterUsed amount of water used
      */
     public synchronized void missionCompleted(int droneId, int zoneId, int waterUsed) {
-        // Update drone state to IDLE (don't recreate the drone)
         DroneSubsystem drone = droneStates.get(droneId);
         if (drone != null) {
             drone.setState(DroneSubsystem.DroneState.IDLE);
@@ -171,17 +208,25 @@ public class Scheduler {
         System.out.printf("Scheduler [%s]: Drone %d completed mission at zone %d (used %dL water)%n",
                 clock.getFormattedTime(), droneId, zoneId, waterUsed);
 
-        // Check if this zone still has fire events in queue
-        boolean zoneStillHasFire = false;
-
-        if (!zoneStillHasFire) {
-            notifyFireSubsystem(zoneId);
-        }
-
         // Remove or reduce the assigned water for this zone
         assignedWaterPerZone.computeIfPresent(zoneId, (k, v) -> (v - waterUsed <= 0) ? null : v - waterUsed);
 
-        // Notify waiting drones looking for work
+        activeMissionCount--;
+
+        // Determine new state
+        boolean anyQueued = !highFireEventQueue.isEmpty() || !moderateFireEventQueue.isEmpty() || !lowFireEventQueue.isEmpty();
+
+        if (activeMissionCount == 0) {
+            if (anyQueued) {
+                currentState = SchedulerState.DISPATCHING;
+            } else {
+                currentState = SchedulerState.IDLE;
+            }
+        } else {
+            // Still active missions
+            currentState = anyQueued ? SchedulerState.DISPATCHING : SchedulerState.MONITORING;
+        }
+
         notifyAll();
     }
 
@@ -192,6 +237,8 @@ public class Scheduler {
      */
     public synchronized void droneRefilling(int droneId) {
         System.out.println("Scheduler: Drone " + droneId + " going for water refill");
+        refillingCount++;
+        currentState = SchedulerState.REFILLING;
     }
 
     /**
@@ -201,9 +248,18 @@ public class Scheduler {
      */
     public synchronized void droneRefillComplete(int droneId) {
         System.out.println("Scheduler: Drone " + droneId + " refill complete, ready for missions");
-        notifyAll(); // Wake up if it was waiting
+        refillingCount--;
+        if (refillingCount == 0) {
+            // If no more refilling drones, go back to appropriate state
+            boolean anyQueued = !highFireEventQueue.isEmpty() || !moderateFireEventQueue.isEmpty() || !lowFireEventQueue.isEmpty();
+            if (activeMissionCount == 0) {
+                currentState = anyQueued ? SchedulerState.DISPATCHING : SchedulerState.IDLE;
+            } else {
+                currentState = anyQueued ? SchedulerState.DISPATCHING : SchedulerState.MONITORING;
+            }
+        }
+        notifyAll();
     }
-
 
     /**
      * Alerts the fire subsystem that the fire has been extinguished.
@@ -214,22 +270,12 @@ public class Scheduler {
         System.out.println("Scheduler: Fire extinguished at zone " + zoneId + ".");
     }
 
+    // --- Getters for GUI ---
 
-
-
-
-
-
-    /**
-     * Returns an unmodifiable view of the drone states map.
-     */
     public synchronized Map<Integer, DroneSubsystem> getDroneStates() {
         return Collections.unmodifiableMap(droneStates);
     }
 
-    /**
-     * Returns the number of active fires by severity: [high, moderate, low]
-     */
     public synchronized int[] getFireCountsBySeverity() {
         int high = highFireEventQueue != null ? highFireEventQueue.size() : 0;
         int moderate = moderateFireEventQueue != null ? moderateFireEventQueue.size() : 0;
@@ -249,9 +295,6 @@ public class Scheduler {
         return new int[]{high, moderate, low};
     }
 
-    /**
-     * Returns a map from zone ID to the total remaining water needed
-     */
     public synchronized Map<Integer, Integer> getActiveFiresPerZone() {
         Map<Integer, Integer> total = new HashMap<>();
         // Add water from queues
@@ -266,5 +309,10 @@ public class Scheduler {
             total.merge(e.getKey(), e.getValue(), Integer::sum);
         }
         return total;
+    }
+
+    // Optional: get current scheduler state for debugging
+    public synchronized SchedulerState getCurrentState() {
+        return currentState;
     }
 }

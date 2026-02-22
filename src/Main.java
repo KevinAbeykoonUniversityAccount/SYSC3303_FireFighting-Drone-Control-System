@@ -5,7 +5,6 @@ import javax.swing.*;
  *
  * @author Aryan Kumar Singh (101299776)
  */
-
 public class Main {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
@@ -15,8 +14,8 @@ public class Main {
             // Set the start time of simulated clock
             clock.setSimulationStartTime(0, 0, 0);
 
-            // Set clock speed: 60 = 1 real second = 1 simulated minute
-            clock.setClockSpeedMultiplier(60);
+            // Set clock speed: 60 means 1 real second = 1 simulated minute
+            clock.setClockSpeedMultiplier(30);
             Thread clockThread = new Thread(clock, "SimulationClock");
             clockThread.start();
 
