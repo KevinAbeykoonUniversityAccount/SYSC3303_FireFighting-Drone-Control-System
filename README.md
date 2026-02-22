@@ -44,7 +44,7 @@ This project simulates a **firefighting system using autonomous drones** coordin
 - Water capacity constraints and refilling
 
 
-## How to Run
+## How to Run Application
 
 1. Run the Main class
 2. Observe simulation output in the console
@@ -52,6 +52,18 @@ This project simulates a **firefighting system using autonomous drones** coordin
 
 Ensure the csv event file is in the src folder.
 
+
+## How To Run Tests
+All unit tests relevant to iteration 2are located in the `test/Iteration 2/` directory. The tests verify the behavior of the Scheduler, DroneSubsystem, and FireEvent classes, including priority handling, partial mission assignment, and state transitions.
+
+#### Run all tests in the `Iteration 2` package:
+1. In the **Project** tool window, navigate to `test/Iteration 2`.
+2. Right‑click on the package (or on any test class) and select **Run 'Tests in 'Iteration 2''** (or **Run All Tests**).
+
+#### Run a single test class:
+- Open the desired test class (e.g., `SchedulerTest.java`).
+- Click the green triangle in the gutter next to the class declaration or any individual test method, then select **Run 'SchedulerTest'**.
+  
 
 ## Authors
 1. Aryan Kumar Singh (101299776)
