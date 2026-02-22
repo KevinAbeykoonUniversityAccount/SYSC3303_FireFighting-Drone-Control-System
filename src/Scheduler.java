@@ -6,17 +6,6 @@ import java.util.*;
  * scheduling drones to put out fires, and reporting back that
  * the fire has been put out.
  *
- * @author Kevin Abeykoon (101301971)
- * @author Aryan Kumar Singh (101299776)
- */
-import java.util.*;
-
-/**
- * The Scheduler class is the central program of the fire fighting
- * control system. It is responsible for receiving fire events,
- * scheduling drones to put out fires, and reporting back that
- * the fire has been put out.
- *
  * This version includes a state machine to model the scheduler's behaviour.
  *
  * @author Kevin Abeykoon (101301971)
