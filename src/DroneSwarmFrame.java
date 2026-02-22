@@ -60,6 +60,7 @@ public class DroneSwarmFrame extends JFrame {
                     model.getDroneStates(),
                     model.getActiveFiresPerZone()
             );
+
             // Update drone status table and fire counts
             droneStatusPanel.refreshData();
         }

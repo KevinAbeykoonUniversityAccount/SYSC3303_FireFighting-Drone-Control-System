@@ -59,12 +59,41 @@ public class DroneSubsystem extends Thread {
         this.scheduler = scheduler;
     }
 
-
+    /**
+     * Return the current x coordinate of the drone relative to the grid map
+     *
+     * @return current x position of drone
+     */
     public int getX() {return this.xGridLocation;}
+
+    /**
+     * Return the current y coordinate of the drone relative to the grid map
+     *
+     * @return current y position of drone
+     */
     public int getY() {return this.yGridLocation;}
+
+    /**
+     * Return the water remaining in the drone's tank
+     *
+     * @return current water volume (litres) in drone tank
+     */
     public int getWaterRemaining() {return this.waterRemaining;}
+
+    /**
+     * Return the current state of the drone
+     *
+     * @return state of the drone
+     */
     public DroneState getDroneState() {return this.droneState;}
+
+    /**
+     * Return the drone's number identification
+     *
+     * @return id of drone
+     */
     public Integer getDroneId() { return this.droneId; }
+
     /**
      * Get the current mission of the drone
      *
@@ -77,6 +106,10 @@ public class DroneSubsystem extends Thread {
     public void setMissionCoordinates(int xPos, int yPos){
         this.xGridLocation = xPos;
         this.yGridLocation = yPos;
+    }
+
+    public void setCurrentMission(FireEvent currentMission){
+        this.currentMission = currentMission;
     }
 
     /**
@@ -142,20 +175,6 @@ public class DroneSubsystem extends Thread {
         System.out.printf("Drone %d: Arrived at destination (%d, %d) at simulation time %s%n",
                 droneId, targetX, targetY, clock.getFormattedTime());
     }
-
-
-    /**
-     * Calculate the time needed to drop a specific amount of water
-     * including nozzle open/close times
-     */
-    private double calculateDropTime(int waterAmount) {
-        if (waterAmount <= 0) return 0;
-
-        double flowTime = waterAmount / FLOW_RATE; // Time to actually drop water
-        return NOZZLE_OPEN_TIME + flowTime + NOZZLE_CLOSE_TIME;
-    }
-
-
 
 
     /**
@@ -250,7 +269,7 @@ public class DroneSubsystem extends Thread {
 
     public void performAction() {
         try {
-            switch(droneState){
+            switch (droneState) {
                 case IDLE:
                     // 1. Request mission from scheduler, will wait until one is available
                     FireEvent mission = scheduler.requestMission(droneId);
@@ -262,29 +281,29 @@ public class DroneSubsystem extends Thread {
                     }
                     break;
 
-                    case ONROUTE:
-                        // 2. Move to fire location (convert zoneId to coordinates)
-                        if (currentMission != null) {
-                            int targetX = getXFromZone(currentMission.getZoneId());
-                            int targetY = getYFromZone(currentMission.getZoneId());
+                case ONROUTE:
+                    // 2. Move to fire location (convert zoneId to coordinates)
+                    if (currentMission != null) {
+                        int targetX = getXFromZone(currentMission.getZoneId());
+                        int targetY = getYFromZone(currentMission.getZoneId());
 
-                            System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
-                                    droneId, currentMission.getZoneId(), targetX, targetY);
+                        System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
+                                droneId, currentMission.getZoneId(), targetX, targetY);
 
-                            moveDrone(targetX, targetY);
+                        moveDrone(targetX, targetY);
 
-                            // After moving, transition to extinguishing
-                            setState(DroneState.EXTINGUISHING);
-                        } else {
-                            // No mission, go back to idle
-                            setState(DroneState.IDLE);
-                        }
-                        break;
+                        // After moving, transition to extinguishing
+                        setState(DroneState.EXTINGUISHING);
+                    } else {
+                        // No mission, go back to idle
+                        setState(DroneState.IDLE);
+                    }
+                    break;
 
-                    case EXTINGUISHING:
-                        // Drop agent on the fire
-                        int waterNeeded = currentMission.getWaterRemaining();
-                        int waterUsed = extinguishFire(waterNeeded);
+                case EXTINGUISHING:
+                    // Drop agent on the fire
+                    int waterNeeded = currentMission.getWaterRemaining();
+                    int waterUsed = extinguishFire(waterNeeded);
 
                     // Report completion to scheduler
                     scheduler.missionCompleted(droneId, currentMission.getZoneId(), waterUsed);
@@ -311,18 +330,17 @@ public class DroneSubsystem extends Thread {
                     droneState = DroneState.IDLE;
                     break;
 
-                    case DECOMMISSIONED:
-                        decommissioned = true;
-                        System.out.printf("Drone %d is decommissioned.%n", droneId);
-                        break;
-                }
-
-                Thread.sleep(10);
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
+                case DECOMMISSIONED:
+                    System.out.printf("Drone %d is decommissioned.%n", droneId);
+                    break;
             }
+
+            Thread.sleep(10);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     @Override
     public void run() {

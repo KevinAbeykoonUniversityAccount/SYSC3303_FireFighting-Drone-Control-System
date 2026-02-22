@@ -31,15 +31,13 @@ public class Scheduler {
         moderateFireEventQueue = new LinkedList<>();
         highFireEventQueue = new LinkedList<>();
 
-        /*for(int i = 0; i < numberOfDrones; i++){
-            droneStates.put(i, new DroneSubsystem(i, this));
-        }*/
-
         this.clock = SimulationClock.getInstance();
     }
 
     /**
      * Register a drone with the scheduler
+     *
+     * @param drone registered to this fire event scheduling system
      */
     public synchronized void registerDrone(DroneSubsystem drone) {
         droneStates.put(drone.getDroneId(), drone);
@@ -69,6 +67,11 @@ public class Scheduler {
         notifyAll(); // Wake up drone threads that are waiting
     }
 
+    /**
+     * Returns the fire incident with the current highest priority to assign to a drone
+     *
+     * @return fire with highest priority
+     */
     private FireEvent retrieveHighestPriorityEvent(){
         if(!highFireEventQueue.isEmpty()){
             return highFireEventQueue.pollFirst();
@@ -83,6 +86,12 @@ public class Scheduler {
         return null;
     }
 
+    /**
+     * Adds fire incidents who were not fully extingusihed back into their respective
+     * severity queue.
+     *
+     * @return fire event that needs to be readded to queue
+     */
     public synchronized void rescheduleUnfinishedFireEvent(FireEvent event){
         if(event.getSeverity() == FireEvent.FireSeverity.HIGH){
             highFireEventQueue.addFirst(event);
@@ -213,10 +222,6 @@ public class Scheduler {
     private void notifyFireSubsystem(int zoneId){
         System.out.println("Scheduler: Fire extinguished at zone " + zoneId + ".");
     }
-
-
-
-
 
 
 
