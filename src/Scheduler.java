@@ -288,6 +288,8 @@ public class Scheduler {
 
     /**
      * Returns an unmodifiable view of the drone states map.
+     *
+     * @return A snapshot collection of all the drone's current states
      */
     public synchronized Map<Integer, DroneSubsystem> getDroneStates() {
         return Collections.unmodifiableMap(droneStates);
