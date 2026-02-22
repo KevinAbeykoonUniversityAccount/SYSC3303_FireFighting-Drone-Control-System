@@ -54,11 +54,14 @@ public class Scheduler {
         lowFireEventQueue = new LinkedList<>();
         moderateFireEventQueue = new LinkedList<>();
         highFireEventQueue = new LinkedList<>();
+
         this.clock = SimulationClock.getInstance();
     }
 
     /**
      * Register a drone with the scheduler
+     *
+     * @param drone registered to this fire event scheduling system
      */
     public synchronized void registerDrone(DroneSubsystem drone) {
         droneStates.put(drone.getDroneId(), drone);
@@ -90,6 +93,11 @@ public class Scheduler {
         notifyAll(); // Wake up drone threads that are waiting
     }
 
+    /**
+     * Returns the fire incident with the current highest priority to assign to a drone
+     *
+     * @return fire with highest priority
+     */
     private FireEvent retrieveHighestPriorityEvent(){
         if(!highFireEventQueue.isEmpty()){
             return highFireEventQueue.pollFirst();
@@ -103,6 +111,12 @@ public class Scheduler {
         return null;
     }
 
+    /**
+     * Adds fire incidents who were not fully extingusihed back into their respective
+     * severity queue.
+     *
+     * @return fire event that needs to be readded to queue
+     */
     public synchronized void rescheduleUnfinishedFireEvent(FireEvent event){
         if(event.getSeverity() == FireEvent.FireSeverity.HIGH){
             highFireEventQueue.addFirst(event);
@@ -272,10 +286,16 @@ public class Scheduler {
 
     // --- Getters for GUI ---
 
+    /**
+     * Returns an unmodifiable view of the drone states map.
+     */
     public synchronized Map<Integer, DroneSubsystem> getDroneStates() {
         return Collections.unmodifiableMap(droneStates);
     }
 
+    /**
+     * Returns the number of active fires by severity: [high, moderate, low]
+     */
     public synchronized int[] getFireCountsBySeverity() {
         int high = highFireEventQueue != null ? highFireEventQueue.size() : 0;
         int moderate = moderateFireEventQueue != null ? moderateFireEventQueue.size() : 0;
@@ -295,6 +315,9 @@ public class Scheduler {
         return new int[]{high, moderate, low};
     }
 
+    /**
+     * Returns a map from zone ID to the total remaining water needed
+     */
     public synchronized Map<Integer, Integer> getActiveFiresPerZone() {
         Map<Integer, Integer> total = new HashMap<>();
         // Add water from queues
@@ -311,7 +334,7 @@ public class Scheduler {
         return total;
     }
 
-    // Optional: get current scheduler state for debugging
+    // Get current scheduler state for debugging
     public synchronized SchedulerState getCurrentState() {
         return currentState;
     }
