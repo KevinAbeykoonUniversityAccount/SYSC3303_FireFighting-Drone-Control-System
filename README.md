@@ -79,7 +79,7 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   #### Iteration 1
 - Worked on the implementation of Drone State, DroneSubsystem, FireEvent, and Scheduler
 - Worked on Javadoc documentation for all classes and README
-  #### Iteration 2
+#### Iteration 2
   - Wrote the Scheduler tests
   - Created the Sequence diagram depicting how the GUI retrieves data and redisplays, aswell as the general flow of the simulation
   - Since I did most of the Scheduler work for this iteration during the last iteration, there was not much more to do
