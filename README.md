@@ -61,12 +61,12 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
 2. Right‑click on the package (or on any test class) and select **Run 'Tests in 'Iteration 2''** (or **Run All Tests**).
 
 #### Run a single test class:
-- Open the desired test class (e.g., `SchedulerTest.java`).
+- Open the desired test class (e.g., `SchedulerTest2.java`).
 - Click the green triangle in the gutter next to the class declaration or any individual test method, then select **Run 'SchedulerTest'**.
   
 
 ## Authors
-1. Aryan Kumar Singh (101299776)
+### 1. Aryan Kumar Singh (101299776)
   #### Iteration 1
   - Worked on the implementation of all 9 classes including the GUI
   - Worked on the Javadoc documentation
@@ -75,14 +75,14 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   - Integrated a state machine design for scheduler and drones (i.e. classic switch case's implementation)
   - Worked on some Javadoc documentation
     
-2. Kevin Abeykoon (101301971)
+### 2. Kevin Abeykoon (101301971)
 - Worked on the implementation of Drone State, DroneSubsystem, FireEvent, and Scheduler
 - Worked on Javadoc documentation for all classes and README
    
-3. Rayyan Kashif (101274266)
+### 3. Rayyan Kashif (101274266)
 - Worked on the implementation of FireEventSubsystem
 - Worked on UML Class Diagrams
   
-4. Abdullah Khan (101305235)
+### 4. Abdullah Khan (101305235)
 - Worked on the implementation of DroneSubsystem
 - Worked on UML Sequence Diagrams
