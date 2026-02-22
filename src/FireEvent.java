@@ -55,6 +55,19 @@ public class FireEvent{
         waterRemaining = initialWaterRequired;
     }
 
+    /**
+     * Copy constructor for creating a new FireEvent with a specific assigned water amount.
+     */
+    public FireEvent(FireEvent original, int assignedWater) {
+        this.zoneId = original.zoneId;
+        this.eventType = original.eventType;
+        this.severity = original.severity;
+        this.initialWaterRequired = assignedWater;   // The drone's portion
+        this.waterRemaining = assignedWater;
+        this.secondsFromStart = original.secondsFromStart;
+        this.fireIncidentStartTime = original.fireIncidentStartTime;
+    }
+
     public int getZoneId() {
         return zoneId;
     }

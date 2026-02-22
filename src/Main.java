@@ -21,12 +21,13 @@ public class Main {
             clockThread.start();
 
             // Create scheduler with number of drones
-            int numberOfDrones = 1;
+            int numberOfDrones = 3;
             Scheduler scheduler = new Scheduler(numberOfDrones);
 
             // Create and start drones threads
             for (int i = 0; i < numberOfDrones; i++) {
                 DroneSubsystem drone = new DroneSubsystem(i, scheduler);
+                scheduler.registerDrone(drone); // Register the drone with scheduler
                 drone.start(); // Start drone thread
             }
 
