@@ -59,6 +59,7 @@ public class DroneSubsystem extends Thread {
         this.scheduler = scheduler;
     }
 
+
     public int getX() {return this.xGridLocation;}
     public int getY() {return this.yGridLocation;}
     public int getWaterRemaining() {return this.waterRemaining;}
@@ -247,25 +248,19 @@ public class DroneSubsystem extends Thread {
 
 
 
-    @Override
-    public void run() {
-        System.out.println("Drone " + droneId + " starting operations...");
+    public void performAction() {
+        try {
+            switch(droneState){
+                case IDLE:
+                    // 1. Request mission from scheduler, will wait until one is available
+                    FireEvent mission = scheduler.requestMission(droneId);
 
-        boolean decommissioned = false;
+                    if (mission != null) {
+                        this.currentMission = mission;
 
-        while (!decommissioned) {
-            try {
-                switch(droneState){
-                    case IDLE:
-                        // 1. Request mission from scheduler, will wait until one is available
-                        FireEvent mission = scheduler.requestMission(droneId);
-
-                        if (mission != null) {
-                            this.currentMission = mission;
-
-                            setState(DroneState.ONROUTE);
-                        }
-                        break;
+                        setState(DroneState.ONROUTE);
+                    }
+                    break;
 
                     case ONROUTE:
                         // 2. Move to fire location (convert zoneId to coordinates)
@@ -291,30 +286,30 @@ public class DroneSubsystem extends Thread {
                         int waterNeeded = currentMission.getWaterRemaining();
                         int waterUsed = extinguishFire(waterNeeded);
 
-                        // Report completion to scheduler
-                        scheduler.missionCompleted(droneId, currentMission.getZoneId(), waterUsed);
-                        currentMission = null;
+                    // Report completion to scheduler
+                    scheduler.missionCompleted(droneId, currentMission.getZoneId(), waterUsed);
+                    currentMission = null;
 
-                        // Decide next state based on remaining water
-                        if (waterRemaining <= 0) {
-                            droneState = DroneState.REFILLING;
-                        } else {
-                            droneState = DroneState.IDLE;
-                        }
-                        break;
-
-                    case REFILLING:
-                        // Go to base and refill (method sets state to IDLE when done)
-                        goForRefill();
-                        break;
-
-                    case FAULTED:
-                        // Placeholder for fault handling (to be expanded in later iterations)
-                        System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
-                        Thread.sleep(1000);
-                        // For now, just go back to idle (actual fault logic will be added later)
+                    // Decide next state based on remaining water
+                    if (waterRemaining <= 0) {
+                        droneState = DroneState.REFILLING;
+                    } else {
                         droneState = DroneState.IDLE;
-                        break;
+                    }
+                    break;
+
+                case REFILLING:
+                    // Go to base and refill (method sets state to IDLE when done)
+                    goForRefill();
+                    break;
+
+                case FAULTED:
+                    // Placeholder for fault handling (to be expanded in later iterations)
+                    System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
+                    Thread.sleep(1000);
+                    // For now, just go back to idle (actual fault logic will be added later)
+                    droneState = DroneState.IDLE;
+                    break;
 
                     case DECOMMISSIONED:
                         decommissioned = true;
@@ -329,6 +324,12 @@ public class DroneSubsystem extends Thread {
                 break;
             }
 
+    @Override
+    public void run() {
+        System.out.println("Drone " + droneId + " starting operations...");
+
+        while (droneState != DroneState.DECOMMISSIONED) {
+            performAction();
         }
     }
 
