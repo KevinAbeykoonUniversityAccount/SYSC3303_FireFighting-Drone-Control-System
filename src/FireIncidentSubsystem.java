@@ -52,7 +52,7 @@ public class FireIncidentSubsystem implements Runnable {
                     int hours = Integer.parseInt(timeParts[0]);
                     int minutes = Integer.parseInt(timeParts[1]);
                     int seconds = Integer.parseInt(timeParts[2]);
-                    int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds;
+                    int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds+10;
 
                     // Use the clock's sleep method to wait until event time
                     if (eventTimeSeconds > clock.getSimulationTimeSeconds()) {
