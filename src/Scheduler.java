@@ -33,6 +33,8 @@ public class Scheduler {
     private int activeMissionCount = 0;          // drones currently on a mission
     private int refillingCount = 0;               // drones currently refilling
 
+    private Map<Integer, Zone> zones = new HashMap<>();
+
     /**
      * Constructor to create a variable amount of
      * drones, starting in the IDLE state.
@@ -45,6 +47,11 @@ public class Scheduler {
         highFireEventQueue = new LinkedList<>();
 
         this.clock = SimulationClock.getInstance();
+
+        zones.put(1, new Zone(1, 0, 14, 0, 14 ));
+        zones.put(2,new Zone(2, 15, 29, 0, 14 ));
+        zones.put(3,new Zone(3, 0, 14, 15, 29 ));
+        zones.put(4,new Zone(4, 15, 29, 15, 29 ));
     }
 
     /**
@@ -100,6 +107,38 @@ public class Scheduler {
         return null;
     }
 
+    private FireEvent retrieveBestEventForDrone(DroneSubsystem drone) {
+
+        Deque<FireEvent> queue;
+
+        if (!highFireEventQueue.isEmpty()) {
+            queue = highFireEventQueue;
+        } else if (!moderateFireEventQueue.isEmpty()) {
+            queue = moderateFireEventQueue;
+        } else if (!lowFireEventQueue.isEmpty()) {
+            queue = lowFireEventQueue;
+        } else {
+            return null;
+        }
+
+        FireEvent bestEvent = null;
+        int bestDistance = Integer.MAX_VALUE;
+
+        for (FireEvent event : queue) {
+
+            int distance = distanceToZone(drone, event.getZoneId());
+
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestEvent = event;
+            }
+        }
+
+        queue.remove(bestEvent);
+
+        return bestEvent;
+    }
+
     /**
      * Adds fire incidents who were not fully extingusihed back into their respective
      * severity queue.
@@ -138,16 +177,22 @@ public class Scheduler {
         }
 
         // Wait for work if queue is empty
-        FireEvent mission = retrieveHighestPriorityEvent();
+        FireEvent mission = retrieveBestEventForDrone(droneStates.get(droneId));
         while (mission == null) {
+            // If drone is NOT at base, don't block
+            if (drone.getX() != 0 || drone.getY() != 0) {
+                return null;
+            }
             try {
                 wait();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return null;
             }
-            mission = retrieveHighestPriorityEvent();
+
+            mission = retrieveBestEventForDrone(droneStates.get(droneId));
         }
+
 
         int droneCapacity = drone.getWaterRemaining();
         int waterNeeded = mission.getWaterRemaining();
@@ -328,5 +373,15 @@ public class Scheduler {
     // Get current scheduler state for debugging
     public synchronized SchedulerState getCurrentState() {
         return currentState;
+    }
+
+    private int distanceToZone(DroneSubsystem drone, int zoneId) {
+
+        Zone zone = zones.get(zoneId);
+
+        int dx = Math.abs(drone.getX() - zone.getCenterX());
+        int dy = Math.abs(drone.getY() - zone.getCenterY());
+
+        return dx + dy;
     }
 }
