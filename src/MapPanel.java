@@ -7,8 +7,6 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * This MapPanel class is the panel that contains the
  * zone map, with all the visual fire and drone information.
- *
- * @author Aryan Kumar Singh (101299776)
  */
 public class MapPanel extends JPanel {
     private java.util.List<Zone> zones = new ArrayList<>();
