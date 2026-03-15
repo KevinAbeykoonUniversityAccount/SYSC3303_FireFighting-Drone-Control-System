@@ -271,13 +271,16 @@ public class DroneSubsystem extends Thread {
         try {
             switch (droneState) {
                 case IDLE:
-                    // 1. Request mission from scheduler, will wait until one is available
+                    // Ensures Drone isn't stuck in the field waiting forever
                     FireEvent mission = scheduler.requestMission(droneId);
 
+                    // 1. Request mission from scheduler, will wait until one is available
                     if (mission != null) {
-                        this.currentMission = mission;
-
+                        currentMission = mission;
                         setState(DroneState.ONROUTE);
+                    }
+                    else if (waterRemaining < MAX_CAPACITY) {
+                        goForRefill();
                     }
                     break;
 
@@ -321,6 +324,7 @@ public class DroneSubsystem extends Thread {
                     // Go to base and refill (method sets state to IDLE when done)
                     goForRefill();
                     break;
+
 
                 case FAULTED:
                     // Placeholder for fault handling (to be expanded in later iterations)
