@@ -16,6 +16,11 @@ public class FireEvent{
         HIGH
     }
 
+
+    public static final int LOW_SEVERE_WATER = 5;
+    public static final int MEDIUM_SEVERE_WATER = 10;
+    public static final int HIGH_SEVERE_WATER = 15;
+
     private final int zoneId;
     private String eventType;
     private FireSeverity severity;
@@ -34,17 +39,17 @@ public class FireEvent{
         switch(severity.toUpperCase()){
             case "LOW":
                 this.severity = FireSeverity.LOW;
-                this.initialWaterRequired = 10;
+                this.initialWaterRequired = LOW_SEVERE_WATER;
                 break;
 
             case "MODERATE":
                 this.severity = FireSeverity.MODERATE;
-                this.initialWaterRequired = 20;
+                this.initialWaterRequired = MEDIUM_SEVERE_WATER;
                 break;
 
             case "HIGH":
                 this.severity = FireSeverity.HIGH;
-                this.initialWaterRequired = 30;
+                this.initialWaterRequired = HIGH_SEVERE_WATER;
                 break;
 
             default:

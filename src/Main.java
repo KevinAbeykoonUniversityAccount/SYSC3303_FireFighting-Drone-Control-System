@@ -22,6 +22,7 @@ public class Main {
             // Create scheduler with number of drones
             int numberOfDrones = 3;
             Scheduler scheduler = new Scheduler(numberOfDrones);
+            Thread tscheduler = new Thread(scheduler, "scheduler");
 
             // Create and start drones threads
             for (int i = 0; i < numberOfDrones; i++) {
@@ -34,6 +35,7 @@ public class Main {
             String inputFile = "src/Sample_event_file.csv";
             Thread fireSubsystem = new Thread(new FireIncidentSubsystem(scheduler, inputFile), "FireSubsystem");
             fireSubsystem.start();
+            tscheduler.start();
 
             DroneSwarmFrame gui = new DroneSwarmFrame(scheduler);
             gui.setVisible(true);
