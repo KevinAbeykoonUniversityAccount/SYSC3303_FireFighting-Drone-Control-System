@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class MapPanel extends JPanel {
     private java.util.List<Zone> zones = new ArrayList<>();
-    private Map<Integer, DroneSubsystem> drones = new HashMap<>();
+    private Map<Integer, DroneInfo> drones = new HashMap<>();
     private Map<Integer, Integer> fireSeverityMap = new HashMap<>(); // zone -> total water needed
 
     // Grid properties: 30x30 cells, each representing 100m x 100m
@@ -40,7 +40,7 @@ public class MapPanel extends JPanel {
     /**
      * Update drone positions and fire data from scheduler
      */
-    public void updateDronesAndFires(Map<Integer, DroneSubsystem> droneMap,
+    public void updateDronesAndFires(Map<Integer, DroneInfo> droneMap,
                                      Map<Integer, Integer> zoneWater) {
         this.drones = droneMap;
         this.fireSeverityMap = zoneWater;
@@ -254,27 +254,22 @@ public class MapPanel extends JPanel {
 
     private void drawDrones(Graphics2D g2d) {
         if (drones != null && !drones.isEmpty()) {
-            for (DroneSubsystem drone : drones.values()) {
+            for (DroneInfo drone : drones.values()) {  // CHANGED: DroneSubsystem → DroneInfo
                 if (drone != null) {
-                    int x = drone.getX() * CELL_SIZE_PX + CELL_SIZE_PX/2;
-                    int y = drone.getY() * CELL_SIZE_PX + CELL_SIZE_PX/2;
+                    int x = drone.x * CELL_SIZE_PX + CELL_SIZE_PX/2;  // CHANGED: getX() → drone.x
+                    int y = drone.y * CELL_SIZE_PX + CELL_SIZE_PX/2;  // CHANGED: getY() → drone.y
 
                     // Draw drone shadow
                     g2d.setColor(new Color(0, 0, 0, 50));
                     g2d.fillOval(x - 8, y - 8, 20, 20);
 
-                    // Color by state
-                    DroneSubsystem.DroneState state = drone.getDroneState();
-                    if (state == DroneSubsystem.DroneState.ONROUTE) {
-                        g2d.setColor(Color.BLUE);
-                    } else if (state == DroneSubsystem.DroneState.EXTINGUISHING) {
-                        g2d.setColor(Color.GREEN);
-                    } else if (state == DroneSubsystem.DroneState.REFILLING) {
-                        g2d.setColor(Color.CYAN);
-                    } else if (state == DroneSubsystem.DroneState.FAULTED) {
-                        g2d.setColor(Color.MAGENTA);
-                    } else {
-                        g2d.setColor(Color.BLACK); // IDLE
+                    // Color by state - CHANGED: DroneSubsystem.DroneState → String comparison
+                    switch (drone.state) {
+                        case "ONROUTE":       g2d.setColor(Color.BLUE);    break;
+                        case "EXTINGUISHING": g2d.setColor(Color.GREEN);   break;
+                        case "REFILLING":     g2d.setColor(Color.CYAN);    break;
+                        case "FAULTED":       g2d.setColor(Color.MAGENTA); break;
+                        default:              g2d.setColor(Color.BLACK);   break; // IDLE
                     }
 
                     // Draw drone circle
@@ -283,7 +278,7 @@ public class MapPanel extends JPanel {
                     // Draw drone ID
                     g2d.setColor(Color.WHITE);
                     g2d.setFont(new Font("Arial", Font.BOLD, 10));
-                    g2d.drawString(String.valueOf(drone.getDroneId()), x - 4, y + 4);
+                    g2d.drawString(String.valueOf(drone.droneId), x - 4, y + 4); // CHANGED: getDroneId() → drone.droneId
                 }
             }
         }

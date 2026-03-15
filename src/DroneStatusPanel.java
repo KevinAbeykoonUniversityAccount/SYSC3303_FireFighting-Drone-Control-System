@@ -81,22 +81,18 @@ public class DroneStatusPanel extends JPanel {
     public void refreshData() {
         if (scheduler == null) return;
 
-        //System.out.println("DroneStatusPanel: Refreshing data..."); // Debug line
-
-        // Clear existing rows
         tableModel.setRowCount(0);
 
-        // Add current drone data
-        Map<Integer, DroneSubsystem> drones = scheduler.getDroneStates();
+        Map<Integer,DroneInfo> drones = scheduler.getDroneStates();
         if (drones != null) {
-            for (DroneSubsystem drone : drones.values()) {
+            for (DroneInfo drone : drones.values()) {
                 if (drone != null) {
-                    String state = formatState(drone.getDroneState());
-                    int water = drone.getWaterRemaining();
-                    String pos = "(" + drone.getX() + "," + drone.getY() + ")";
+                    String state = formatState(drone.state);
+                    int water = drone.waterRemaining;
+                    String pos = "(" + drone.x + "," + drone.y + ")";
 
                     tableModel.addRow(new Object[]{
-                            drone.getDroneId(), state, water, pos
+                            drone.droneId, state, water, pos
                     });
                 }
             }
@@ -124,24 +120,17 @@ public class DroneStatusPanel extends JPanel {
     /**
      * Formats the drone state enum into a readable string
      */
-    private String formatState(DroneSubsystem.DroneState state) {
+    private String formatState(String state) {
         if (state == null) return "UNKNOWN";
 
         switch (state) {
-            case IDLE:
-                return "IDLE";
-            case ONROUTE:
-                return "EN ROUTE";
-            case EXTINGUISHING:
-                return "EXTINGUISHING";
-            case REFILLING:
-                return "REFILLING";
-            case FAULTED:
-                return "FAULTED";
-            case DECOMMISSIONED:
-                return "DECOMMISSIONED";
-            default:
-                return state.toString();
+            case "IDLE":          return "IDLE";
+            case "ONROUTE":       return "EN ROUTE";
+            case "EXTINGUISHING": return "EXTINGUISHING";
+            case "REFILLING":     return "REFILLING";
+            case "FAULTED":       return "FAULTED";
+            case "DECOMMISSIONED":return "DECOMMISSIONED";
+            default:              return state;
         }
     }
 
