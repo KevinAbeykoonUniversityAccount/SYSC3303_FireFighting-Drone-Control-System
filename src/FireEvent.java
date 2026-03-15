@@ -34,17 +34,17 @@ public class FireEvent{
         switch(severity.toUpperCase()){
             case "LOW":
                 this.severity = FireSeverity.LOW;
-                this.initialWaterRequired = 10;
+                this.initialWaterRequired = 5;
                 break;
 
             case "MODERATE":
                 this.severity = FireSeverity.MODERATE;
-                this.initialWaterRequired = 20;
+                this.initialWaterRequired = 10;
                 break;
 
             case "HIGH":
                 this.severity = FireSeverity.HIGH;
-                this.initialWaterRequired = 30;
+                this.initialWaterRequired = 15;
                 break;
 
             default:
