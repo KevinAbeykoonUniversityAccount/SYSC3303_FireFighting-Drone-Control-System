@@ -100,3 +100,6 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   #### Iteration 2
   - Worked on DroneSubsystem Tests (for both iterations)
   - Made State Machine Diagram for DroneSubSystem
+  #### Iteration 3
+  - Reworked DroneSubsystem and Scheduler
+  - Updated DroneSubsystem state machine diagram
