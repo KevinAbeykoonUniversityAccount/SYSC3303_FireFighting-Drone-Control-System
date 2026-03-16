@@ -83,7 +83,7 @@ public class DroneStatusPanel extends JPanel {
 
         tableModel.setRowCount(0);
 
-        Map<Integer,DroneInfo> drones = scheduler.getDroneStates();
+        Map<Integer,DroneInfo> drones = scheduler.getDroneRegistry();
         if (drones != null) {
             for (DroneInfo drone : drones.values()) {
                 if (drone != null) {

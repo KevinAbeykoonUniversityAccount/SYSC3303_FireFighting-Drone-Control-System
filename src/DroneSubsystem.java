@@ -38,57 +38,63 @@ public class DroneSubsystem extends Thread {
         DECOMMISSIONED
     }
 
-    private static final int    BUFFER_SIZE    = 1024;
-    private static final int    TIMEOUT_MS     = 5000;
-    private static final int    MAX_RETRIES    = 3;
+    //Constants
+    private static final int    BUFFER_SIZE       = 1024;
+    private static final double NOZZLE_OPEN_TIME  = 0.75;  // seconds
+    private static final double NOZZLE_CLOSE_TIME = 0.75;  // seconds
+    private static final double FLOW_RATE         = 3.77;  // litres / second
+    private static final int    MAX_CAPACITY      = 15;    // litres
+    private static final int    MAX_RETRIES       = 3;
 
-    // Realistic drone parameters from Iteration 0
-    private static final double NOZZLE_OPEN_TIME = 0.75; // seconds
-    private static final double NOZZLE_CLOSE_TIME = 0.75; // seconds
-    private static final double FLOW_RATE = 3.77; // litres per second
-    private static final int MAX_CAPACITY = 15; // litres
-
-    private int droneId;
+    // Drone State
+    private final int droneId;
     private DroneState droneState;
-    private FireEvent incomingMission;
+
+    private volatile FireEvent incomingMission;
     private FireEvent currentMission;
-    //private int zoneId;
-    private int xGridLocation;
-    private int yGridLocation;
-    private int targetX;
-    private int targetY;
-    private int waterRemaining;  // in Litres
 
-    private boolean hasTarget = false;
+    private int     xGridLocation;
+    private int     yGridLocation;
+    private int     targetX;
+    private int     targetY;
+    private boolean hasTarget          = false;
     private boolean missionInterrupted = false;
+    private int     waterRemaining;
+    private int     zoneId;
 
-    private Scheduler scheduler;
+    // Clock
     private SimulationClock clock; // centralized clock
 
-    private final DatagramSocket socket;         // CHANGED
-    private final InetAddress    schedulerAddr;  // CHANGED
-    private final int            schedulerPort;  // CHANGED
-    private final SimulationClock clock;
+    // Networking
+    private final DatagramSocket socket;  // bound to listenPort; used for both send and receive
+    private final InetAddress schedulerAddr;
+    private final int         schedulerPort;
 
-    public DroneSubsystem(int droneId, String schedulerHost, int schedulerPort) // CHANGED
-            throws Exception {
-        this.droneId       = droneId;
-        xGridLocation      = 0;
-        yGridLocation      = 0;
-        zoneId             = 0;
-        droneState         = DroneState.IDLE;
-        waterRemaining     = MAX_CAPACITY;
-        this.schedulerAddr = InetAddress.getByName(schedulerHost);
-        this.schedulerPort = schedulerPort;
-        this.socket        = new DatagramSocket();
-        this.socket.setSoTimeout(TIMEOUT_MS);
-        this.clock         = SimulationClock.getInstance();
+    /**
+     * @param droneId        unique drone identifier
+     * @param schedulerHost  hostname / IP of the Scheduler process
+     * @param schedulerPort  Scheduler's main UDP listen port
+     */
+    public DroneSubsystem(int droneId,
+                          String schedulerHost, int schedulerPort) throws Exception {
+        this.droneId         = droneId;
+        this.xGridLocation   = 0;
+        this.yGridLocation   = 0;
+        this.droneState      = DroneState.IDLE;
+        this.waterRemaining  = MAX_CAPACITY;
+        this.waterRemaining  = MAX_CAPACITY;
+        this.schedulerAddr   = InetAddress.getByName(schedulerHost);
+        this.schedulerPort   = schedulerPort;
+        this.socket          = new DatagramSocket(0);
+
+        // during thread.sleep, wake up every 200ms to check new incoming missions
+        this.socket.setSoTimeout(200);
+        this.clock           = SimulationClock.getInstance();
         this.incomingMission = null;
-        this.currentMission = null;
-
-        //this.scheduler = scheduler;
+        this.currentMission  = null;
     }
 
+    // Getters and Setters
     public int        getX()              { return this.xGridLocation; }
     public int        getY()              { return this.yGridLocation; }
     public int        getWaterRemaining() { return this.waterRemaining; }
@@ -98,17 +104,16 @@ public class DroneSubsystem extends Thread {
     public void       setCurrentMission(FireEvent e) { this.currentMission = e; }
     public void       setState(DroneState s) { this.droneState = s; }
 
-    public void setMissionCoordinates(int xPos, int yPos) {
-        this.targetX = xPos;
-        this.targetY = yPos;
-        this.hasTarget = true;
-        System.out.println("New coord: " + xPos + " " + yPos);
-    }
-    // ── Zone helpers (unchanged) ──────────────────────────────────────────
 
-    public synchronized void incomingMission(FireEvent incomingMission) {
-        this.incomingMission = incomingMission;
-        if (droneState == DroneState.ONROUTE || droneState == DroneState.RETURNING) {
+    /**
+     * Called by the background listener when the Scheduler pushes a new
+     * assignment.  Stores the event and wakes the main run() thread.
+     * If the drone is currently en-route, sets missionInterrupted so that
+     * moveDrone() exits its movement loop cleanly.
+     */
+    public synchronized void receiveMissionPush(FireEvent event) {
+        this.incomingMission = event;
+        if (droneState == DroneState.ONROUTE) {
             missionInterrupted = true;
         }
         notifyAll();
@@ -119,6 +124,9 @@ public class DroneSubsystem extends Thread {
         this.incomingMission = null;
     }
 
+
+    // ============ Zone coordinate helpers ============
+
     /**
      * Returns the x coordinate of the fire incident based off zone
      *
@@ -126,19 +134,12 @@ public class DroneSubsystem extends Thread {
      * @return The x coordinate of the fire incident
      */
     private int getXFromZone(int zoneId) {
-        // In iteration 1, the zones are hard coded areas, so return the center x coordinate of that zone.
         switch (zoneId) {
-            case 1:
-                return 7;    // Cells 0-14, center ~cell 7
-            case 2:
-                return 22;   // Cells 15-29, center ~cell 22
-            case 3:
-                return 7;    // Cells 0-14, center ~cell 7
-            case 4:
-                return 22;   // Cells 15-29, center ~cell 22
-            default:
-                return 7;
-
+            case 1: return 7;
+            case 2: return 22;
+            case 3: return 7;
+            case 4: return 22;
+            default: return 7;
         }
     }
 
@@ -149,22 +150,16 @@ public class DroneSubsystem extends Thread {
      * @return The y coordinate of the fire incident
      */
     private int getYFromZone(int zoneId) {
-        // In iteration 1, the zones are hard coded areas, so return the center x coordinate of that zone.
         switch (zoneId) {
-            case 1:
-                return 7;    // Center of Zone 1 (cells 0-14)
-            case 2:
-                return 7;    // Center of Zone 2 (cells 0-14)
-            case 3:
-                return 22;   // Center of Zone 3 (cells 15-29)
-            case 4:
-                return 22;   // Center of Zone 4 (cells 15-29)
-            default:
-                return 7;
+            case 1: return 7;
+            case 2: return 7;
+            case 3: return 22;
+            case 4: return 22;
+            default: return 7;
         }
     }
 
-    // ── UDP helpers (CHANGED: replaces direct scheduler calls) ───────────
+    // ========== UDP helpers ==============
 
     /** Send a message and wait for a reply. Retries on timeout. */
     private String sendAndReceive(String message) throws Exception {
@@ -187,294 +182,204 @@ public class DroneSubsystem extends Thread {
         throw new Exception("No response after " + MAX_RETRIES + " attempts");
     }
 
-    /** Send with no reply expected. */
+    /** Sends a message to the Scheduler; no reply is expected. */
     private void sendOnly(String message) {
         try {
             byte[] data = message.getBytes();
-            socket.send(new DatagramPacket(data, data.length, schedulerAddr, schedulerPort));
+            socket.send(new DatagramPacket(
+                    data, data.length, schedulerAddr, schedulerPort));
         } catch (Exception e) {
             System.err.println("Drone " + droneId + " send error: " + e.getMessage());
         }
     }
 
 
-    /**
-     * Moves the drone to the specified location
-     *
-     * @throws InterruptedException
-     */
-    public void moveDrone() throws InterruptedException {
-        if (targetX == xGridLocation && targetY == yGridLocation) {
-            this.hasTarget = false;
-            System.out.printf("Drone %d: Arrived at destination (%d, %d)%n",
-                    droneId, targetX, targetY);
-            handleEvent(droneEvents.ARRIVED);
-        }
-        else if (missionInterrupted) {
-            missionInterrupted = false;
-            return;
-        } else {
-            // Move one cell at a time
-            if (targetX > xGridLocation) xGridLocation++;
-            if (targetX < xGridLocation) xGridLocation--;
-            if (targetY > yGridLocation) yGridLocation++;
-            if (targetY < yGridLocation) yGridLocation--;
+    // ============= Movement ============
 
-            // Sleep for 1 simulation second for this movement
-            sleep(1000);
-            //clock.sleepForSimulationSeconds(1);
-
-            // Sends position to scheduler
-            sendOnly("locationUpdate|" + droneId + "|"
-                    + xGridLocation + "|" + yGridLocation + "|" + droneState.name());
-        }
-            moveDrone();
-        }
-        //System.out.printf("Drone %d: Moved to (%d, %d) at simulation time %s%n", droneId, xGridLocation, yGridLocation, clock.getFormattedTime());
+    /** Sets the movement target. Must be called before moveDrone(). */
+    public void setMissionCoordinates(int x, int y) {
+        this.targetX   = x;
+        this.targetY   = y;
+        this.hasTarget = true;
     }
 
 
     /**
+     * Moves the drone one grid cell per simulated second toward the target
+     * set by setMissionCoordinates().  Reports position to the Scheduler
+     * after every step.
      *
-     * @param waterNeeded The water needed for the fire incident assigned to drone
-     * @return The water utilized in extinguishing the fire.
+     * Returns early without calling handleEvent if missionInterrupted is
+     * raised by the listener thread.  The run() loop detects the pending
+     * incomingMission and re-enters the state machine for the new mission.
+     *
+     * Calls handleEvent(ARRIVED) when the destination is reached.
+     */
+    public void moveDrone() throws InterruptedException {
+        while (xGridLocation != targetX || yGridLocation != targetY) {
+            if (missionInterrupted) {
+                missionInterrupted = false;
+                return;
+            }
+
+            if      (targetX > xGridLocation) xGridLocation++;
+            else if (targetX < xGridLocation) xGridLocation--;
+
+            if      (targetY > yGridLocation) yGridLocation++;
+            else if (targetY < yGridLocation) yGridLocation--;
+
+            sleep(1000);  // one simulated second per cell
+
+            sendOnly("locationUpdate|" + droneId + "|"
+                    + xGridLocation + "|" + yGridLocation + "|"
+                    + droneState.name());
+        }
+
+        hasTarget = false;
+        System.out.printf("Drone %d: Arrived at (%d, %d)%n",
+                droneId, xGridLocation, yGridLocation);
+        handleEvent(droneEvents.ARRIVED);
+    }
+
+
+
+    // ============= FIRE EXTINGUISHING =============
+    /**
+     * Simulates nozzle-open → water-drop → nozzle-close.
+     *
+     * @param waterNeeded litres required to fully extinguish
+     * @return litres actually dropped (capped at waterRemaining)
      * @throws InterruptedException
      */
     public int extinguishFire(int waterNeeded) throws InterruptedException {
         int waterToDrop = Math.min(waterRemaining, waterNeeded);
-
         if (waterToDrop <= 0) {
-            System.out.printf("Drone %d: No water to drop%n", droneId);
+            System.out.printf("Drone %d: No water available%n", droneId);
             return 0;
         }
 
-        System.out.printf("Drone %d: Starting extinguishing sequence for %dL water%n",
-                droneId, waterToDrop);
-        System.out.printf("Drone %d: Opening nozzle (%.2fs)%n", droneId, NOZZLE_OPEN_TIME);
+        System.out.printf("Drone %d: Extinguishing — dropping %dL [sim time %s]%n",
+                droneId, waterToDrop, clock.getFormattedTime());
 
-        // Step 1: Open nozzle
-        sleep((long) (NOZZLE_OPEN_TIME));
-        //clock.sleepForSimulationSeconds((long) (NOZZLE_OPEN_TIME));
+        sleep((long)(NOZZLE_OPEN_TIME  * 1000));
+        sleep((long)(waterToDrop / FLOW_RATE * 1000));
+        sleep((long)(NOZZLE_CLOSE_TIME * 1000));
 
-        // Step 2: Drop water at flow rate
-        double flowTime = waterToDrop / FLOW_RATE;
-        System.out.printf("Drone %d: Dropping water at %.2f L/s for %.2fs%n",
-                droneId, FLOW_RATE, flowTime);
-
-        // Simulate dropping water - we can break this into smaller chunks for realism
-        long flowTimeMillis = (long) (flowTime * 1000);
-        long startTime = System.currentTimeMillis();        // Simulate the water dropping process
-        sleep((long) (flowTime));
-        //clock.sleepForSimulationSeconds((long) (flowTime));
-
-        // Step 3: Close nozzle
-        System.out.printf("Drone %d: Closing nozzle (%.2fs)%n", droneId, NOZZLE_CLOSE_TIME);
-        sleep((long) (NOZZLE_CLOSE_TIME));
-        //clock.sleepForSimulationSeconds((long) (NOZZLE_CLOSE_TIME));
-
-        double totalTime = NOZZLE_OPEN_TIME + flowTime + NOZZLE_CLOSE_TIME;
-        System.out.printf("Drone %d: Extinguishing complete (total time: %.2fs)%n",
-                droneId, totalTime);
-
-        this.waterRemaining -= waterToDrop;
+        waterRemaining -= waterToDrop;
+        System.out.printf("Drone %d: Extinguishing done. Water remaining: %dL%n",
+                droneId, waterRemaining);
         return waterToDrop;
     }
 
-    // ── Refill ────────────────────────────────────────────────────────────
 
-    private void goForRefill() throws InterruptedException {
-        setState(DroneState.REFILLING);
-        sendOnly("droneRefilling|" + droneId); // CHANGED: was scheduler.droneRefilling(droneId)
-        moveDrone(0, 0);
-        refillWater();
-        sendOnly("droneRefillComplete|" + droneId); // CHANGED: was scheduler.droneRefillComplete(droneId)
-        setState(DroneState.IDLE);
-    }
-//    /**
-//     * Move drone to origin point (0,0) to refill on empty tank
-//     *
-//     * @throws InterruptedException
-//     */
-//    private void goForRefill() throws InterruptedException {
-//        setState(DroneState.REFILLING);
-//        scheduler.droneRefilling(droneId);
-//
-//        // Move to refill station (assuming at 0,0)
-//        moveDrone(0, 0);
-//
-//        // Refill water
-//        refillWater();
-//
-//        // Report refill complete
-//        scheduler.droneRefillComplete(droneId);
-//        setState(DroneState.IDLE);
-//    }
 
+
+    // =========== REFILL ===============
     /**
-     * Refill the drone with water up to maximum capacity
-     *
-     * @throws InterruptedException
+     * Simulates a 5-second refill at base and restores the tank to MAX_CAPACITY.
      */
     public void refillWater() throws InterruptedException {
-        System.out.printf("Drone %d: Refilling water tank at simulation time %s%n",
+        System.out.printf("Drone %d: Refilling at base [sim time %s]%n",
                 droneId, clock.getFormattedTime());
-
-        // Refilling takes 5 simulation seconds
         sleep(5000);
-        //clock.sleepForSimulationSeconds(5);
-        System.out.printf("Drone %d: Done refilling water tank at simulation time %s%n",
-                droneId, clock.getFormattedTime());
-        this.waterRemaining = MAX_CAPACITY;
-        //setState(DroneState.IDLE);
+        waterRemaining = MAX_CAPACITY;
+        System.out.printf("Drone %d: Refill complete (%dL) [sim time %s]%n",
+                droneId, waterRemaining, clock.getFormattedTime());
     }
 
-    /**
-     * Set the state of the drone
-     *
-     * @param droneState The new current state the drone is in
-     */
-    public void setState(DroneState droneState) {
-        this.droneState = droneState;
-    }
 
+
+    // ========== STATE MACHINE ===========
     public void handleEvent(droneEvents event) {
-        switch (event) {
-            case NEW_MISSION:
-                if (droneState == DroneState.ONROUTE) {
-                    //missionInterrupted = true;
-                    scheduler.rescheduleUnfinishedFireEvent(currentMission);
+        try {
+            switch (event) {
+
+                // ── Scheduler pushed a new mission ─────────────────────────
+                case NEW_MISSION: {
+                    // If already en-route, reschedule the abandoned mission
+                    if (droneState == DroneState.ONROUTE && currentMission != null) {
+                        sendOnly("rescheduleFireEvent|"
+                                + currentMission.getZoneId()         + "|"
+                                + currentMission.getEventType()       + "|"
+                                + currentMission.getSeverity().name() + "|"
+                                + currentMission.getWaterRemaining()  + "|"
+                                + currentMission.getSecondsFromStart());
+                    }
+
+                    setState(DroneState.ONROUTE);
+                    updateMission();  // incomingMission → currentMission
+
+                    int mx = getXFromZone(currentMission.getZoneId());
+                    int my = getYFromZone(currentMission.getZoneId());
+                    setMissionCoordinates(mx, my);
+
+                    System.out.printf("Drone %d: En-route to Zone %d at (%d, %d)%n",
+                            droneId, currentMission.getZoneId(), mx, my);
+
+                    moveDrone();
+                    // On normal arrival: moveDrone → handleEvent(ARRIVED) → ...
+                    // On interrupt:      moveDrone returns early;
+                    //                    run() loop re-enters NEW_MISSION.
+                    break;
                 }
 
-                setState(DroneState.ONROUTE);
-
-    public void performAction() {
-        try {
-            switch (droneState) {
-                case IDLE:
-                    FireEvent mission = requestMission();
-                    if (mission != null) {
-                        this.currentMission = mission;
-                        setState(DroneState.ONROUTE);
+                // ── Drone reached its current destination ──────────────────
+                case ARRIVED: {
+                    if (droneState == DroneState.ONROUTE) {
+                        // At the fire zone — start extinguishing
+                        handleEvent(droneEvents.COMPLETED_MISSION);
                     } else {
-                        setState(DroneState.REFILLING); // GOTO_REFILL response
+                        // Back at base (state == RETURNING) — refill then idle
+                        setState(DroneState.REFILLING);
+                        sendOnly("droneRefilling|" + droneId);
+                        refillWater();
+                        sendOnly("droneRefillComplete|" + droneId);
+                        setState(DroneState.IDLE);
                     }
                     break;
-                updateMission();
-                int[] missionCoord = {getXFromZone(currentMission.getZoneId()), getYFromZone(currentMission.getZoneId())};
-
-                try {
-                    System.out.printf("Drone %d: Starting movement to (%d, %d)%n",
-                            droneId, missionCoord[0], missionCoord[1]);
-                    setMissionCoordinates(missionCoord[0], missionCoord[1]);
-                    moveDrone();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
                 }
 
-                if (incomingMission != null) {
-                    handleEvent(droneEvents.NEW_MISSION);
-                }
-                break;
+                // ── Extinguish fire and report to Scheduler ─────────────
+                case COMPLETED_MISSION: {
+                    setState(DroneState.EXTINGUISHING);
+                    int waterUsed = extinguishFire(currentMission.getWaterRemaining());
+                    sendOnly("missionCompleted|" + droneId + "|"
+                            + currentMission.getZoneId() + "|" + waterUsed);
+                    currentMission = null;
 
-                case ONROUTE:
-                    if (currentMission != null) {
-                        int targetX = getXFromZone(currentMission.getZoneId());
-                        int targetY = getYFromZone(currentMission.getZoneId());
-                        System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
-                                droneId, currentMission.getZoneId(), targetX, targetY);
-                        moveDrone(targetX, targetY);
-            case ARRIVED:
-                System.out.println(droneState);
-                switch (droneState) {
-                    case ONROUTE:
-                        setState(DroneState.EXTINGUISHING);
+                    if (waterRemaining <= 0) {
+                        // Tank empty — head back to base to refill
+                        setState(DroneState.RETURNING);
+                        setMissionCoordinates(0, 0);
+                        System.out.printf(
+                                "Drone %d: Tank empty — returning to base%n", droneId);
+                        moveDrone();
+                        // moveDrone → handleEvent(ARRIVED) → refill → IDLE
                     } else {
                         setState(DroneState.IDLE);
                     }
                     break;
-
-                        try {
-                            extinguishFire(currentMission.getWaterRemaining());
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-
-                        handleEvent(droneEvents.COMPLETED_MISSION);
-                        break;
-
-                    case RETURNING:
-                        setState(DroneState.REFILLING);
-
-                        try {
-                            refillWater();
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-
-                        handleEvent(droneEvents.REFUELED);
-                        break;
-
-                    default:
-                        break;
-                }
-                break;
-
-                case EXTINGUISHING:
-                    int waterNeeded = currentMission.getWaterRemaining();
-                    int waterUsed   = extinguishFire(waterNeeded);
-                    // CHANGED: was scheduler.missionCompleted(...)
-                    sendOnly("missionCompleted|" + droneId + "|"
-                            + currentMission.getZoneId() + "|" + waterUsed);
-                    currentMission = null;
-                    droneState     = waterRemaining <= 0 ? DroneState.REFILLING : DroneState.IDLE;
-                    break;
-            case COMPLETED_MISSION:
-                setState(DroneState.RETURNING);
-                scheduler.missionCompleted(droneId, currentMission.getZoneId());
-                currentMission = null;
-
-                try {
-                    System.out.printf("Drone %d: Starting movement to (%d, %d)%n",
-                            droneId, 0, 0);
-                    setMissionCoordinates(0, 0);
-                    moveDrone();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
                 }
 
-                if (incomingMission != null) {
-                    handleEvent(droneEvents.NEW_MISSION);
+                // ── Fault / recovery ───────────────────────────────────────
+                case FAULT: {
+                    setState(DroneState.FAULTED);
+                    System.out.printf("Drone %d: FAULTED — recovering%n", droneId);
+                    sleep(1000);
+                    setState(DroneState.IDLE);
+                    break;
                 }
-                break;
 
-            case REFUELED:
-                setState(DroneState.IDLE);
-                scheduler.droneRefillComplete(droneId);
-                break;
-
-                case REFILLING:
-                    goForRefill();
+                // ── Decommission ───────────────────────────────────────────
+                case DECOMMISSION: {
+                    setState(DroneState.DECOMMISSIONED);
+                    System.out.printf("Drone %d: Decommissioned%n", droneId);
                     break;
-            case FAULT:
-                break;
-
-                case FAULTED:
-                    System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
-                    Thread.sleep(1000);
-                    droneState = DroneState.IDLE;
-                    break;
-            case DECOMMISSION:
-                droneState = DroneState.DECOMMISSIONED;
-                break;
-
-                case DECOMMISSIONED:
-                    System.out.printf("Drone %d is decommissioned.%n", droneId);
-                    break;
+                }
 
                 default:
                     break;
             }
-
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -586,7 +491,52 @@ public class DroneSubsystem extends Thread {
 
     @Override
     public void run() {
-        System.out.println("Drone " + droneId + " starting operations...");
+        System.out.printf("Drone %d: Starting%n", droneId);
+
+        // registerWithScheduler() (inlined)
+        sendOnly("registerDrone|" + droneId + "|" + xGridLocation + "|"
+                + yGridLocation + "|" + waterRemaining + "|"
+                + socket.getLocalPort());
+
+        // startListenerThread() + handleSchedulerPush()
+        // Only needed because moveDrone() blocks the main thread with sleep(),
+        // thus the thread listens for any received ASSIGN_MISSION / DECOMMISSION while
+        // the drone moves.
+        Thread listener = new Thread(() -> {
+            byte[] buf = new byte[BUFFER_SIZE];
+            while (droneState != DroneState.DECOMMISSIONED) {
+                try {
+                    DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+                    socket.receive(pkt);
+                    String   msg   = new String(pkt.getData(), 0, pkt.getLength()).trim();
+                    String[] parts = msg.split("\\|");
+                    switch (parts[0]) {
+                        case "ASSIGN_MISSION": {
+                            FireEvent base = new FireEvent(
+                                    Integer.parseInt(parts[1]), parts[2], parts[3],
+                                    Integer.parseInt(parts[5]));
+                            FireEvent mission = new FireEvent(base, Integer.parseInt(parts[4]));
+                            receiveMissionPush(mission);
+                            break;
+                        }
+                        case "DECOMMISSION":
+                            handleEvent(droneEvents.DECOMMISSION);
+                            break;
+                        default:
+                            System.err.println("Drone " + droneId
+                                    + ": unrecognised push: " + parts[0]);
+                    }
+                } catch (SocketException e) {
+                    break;  // socket closed on shutdown
+                } catch (Exception e) {
+                    System.err.println("Drone " + droneId + " listener: " + e.getMessage());
+                }
+            }
+        }, "drone-" + droneId + "-listener");
+        listener.setDaemon(true);
+        listener.start();
+
+        // Main thread drives the state machine — same structure as the original
         while (droneState != DroneState.DECOMMISSIONED) {
             synchronized (this) {
                 while (incomingMission == null && droneState == DroneState.IDLE) {
@@ -594,11 +544,11 @@ public class DroneSubsystem extends Thread {
                 }
             }
             if (incomingMission != null) {
-                handleEvent(droneEvents.NEW_MISSION); // runs on drone's own thread
-                incomingMission = null;
+                handleEvent(droneEvents.NEW_MISSION);
             }
         }
+
         socket.close();
-        System.out.println("Drone " + droneId + " decomissioned...");
+        System.out.printf("Drone %d: Shut down%n", droneId);
     }
 }

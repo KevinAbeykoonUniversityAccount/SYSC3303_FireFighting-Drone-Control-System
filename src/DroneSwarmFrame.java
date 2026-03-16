@@ -57,7 +57,7 @@ public class DroneSwarmFrame extends JFrame {
         if (model != null) {
             // Update drone positions and fire severities on map
             mapPanel.updateDronesAndFires(
-                    model.getDroneStates(),
+                    model.getDroneRegistry(),
                     model.getActiveFiresPerZone()
             );
 
