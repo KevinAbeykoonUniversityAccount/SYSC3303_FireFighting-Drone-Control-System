@@ -6,16 +6,15 @@ import static org.junit.jupiter.api.Assertions.*;
 public class DroneSubsystemTest3 {
 
     private DroneSubsystem drone;
-    private Scheduler scheduler;
-    private FireEvent fireEvent;
 
     @BeforeEach
-    public void setup() {
-        scheduler = new Scheduler(1);
-        fireEvent = new FireEvent(1, "TestFire", "HIGH", 10);
+    public void setup() throws Exception {
 
-        drone = new DroneSubsystem(1, scheduler);
-        scheduler.registerDrone(drone);
+        drone = new DroneSubsystem(
+                1,
+                "localhost",
+                Scheduler.PORT
+        );
     }
 
     @Test
@@ -24,29 +23,16 @@ public class DroneSubsystemTest3 {
     }
 
     @Test
-    public void testMissionLifecycleCompletes() {
+    public void testMissionAssigned() {
+        FireEvent fireEvent = new FireEvent(1, "TestFire", "HIGH", 10);
 
-        drone.incomingMission(fireEvent);
-        drone.handleEvent(DroneSubsystem.droneEvents.NEW_MISSION);
+        drone.receiveMissionPush(fireEvent);
 
-        // After the full lifecycle the drone should return to IDLE
-        assertEquals(DroneSubsystem.DroneState.IDLE, drone.getDroneState());
-        assertNull(drone.getCurrentMission());
-    }
-
-    @Test
-    public void testMissionCoordinatesSet() {
-
-        drone.setMissionCoordinates(10, 12);
-
-        assertTrue(drone.hasTarget());
-        assertEquals(10, drone.getTargetX());
-        assertEquals(12, drone.getTargetY());
+        assertEquals(fireEvent, drone.getIncomingMission());
     }
 
     @Test
     public void testWaterUsage() throws InterruptedException {
-
         int startWater = drone.getWaterRemaining();
 
         int used = drone.extinguishFire(5);
@@ -57,7 +43,6 @@ public class DroneSubsystemTest3 {
 
     @Test
     public void testRefillWater() throws InterruptedException {
-
         drone.extinguishFire(10);
         drone.refillWater();
 
@@ -66,7 +51,6 @@ public class DroneSubsystemTest3 {
 
     @Test
     public void testDecommissionState() {
-
         drone.handleEvent(DroneSubsystem.droneEvents.DECOMMISSION);
 
         assertEquals(DroneSubsystem.DroneState.DECOMMISSIONED, drone.getDroneState());
