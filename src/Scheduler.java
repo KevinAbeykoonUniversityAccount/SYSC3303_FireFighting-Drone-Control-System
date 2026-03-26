@@ -56,6 +56,7 @@ public class Scheduler implements Runnable {
     private final DatagramSocket socket;
     private volatile boolean running = true;
 
+    private final Map<Integer, FireEvent> droneActiveMission = new HashMap<>();
 
     public Scheduler() throws SocketException {
         highFireEventQueue = new LinkedList<>();
@@ -85,6 +86,9 @@ public class Scheduler implements Runnable {
                 socket.receive(pkt);
                 String msg = new String(pkt.getData(), 0, pkt.getLength()).trim();
                 dispatch(msg, pkt.getAddress(), pkt.getPort());
+
+                checkReturnHome();
+
             } catch (SocketException e) {
                 if (running) System.err.println("Scheduler socket error: " + e.getMessage());
             } catch (Exception e) {
@@ -189,12 +193,73 @@ public class Scheduler implements Runnable {
                 sendReply(String.valueOf(clock.getSimulationTimeSeconds()), addr, port);
                 break;
             }
+            case "droneHardFault": {
+                System.out.println("Scheduler: Drone " + parts[1] + " has Hard Faulted. The Drone will shut down.");
 
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo drone = droneRegistry.get(droneId);
+
+                if (drone != null) {
+                    drone.state = "DECOMMISSIONED";
+                }
+
+                retrieveAndRescheduleLostMission(droneId);
+                sendReply("DECOMMISSION", drone.address, drone.port);
+                sendReply("ACK", addr, port);
+
+                tryDispatch();
+                break;
+            }
+            case "droneFaulted": {
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo drone = droneRegistry.get(droneId);
+
+                if (drone != null) {
+                    drone.state = "FAULTED";
+                }
+
+                activeMissionCount = Math.max(0, activeMissionCount - 1);
+                System.out.println("Scheduler: Drone " + droneId + " reported FAULTED");
+
+                retrieveAndRescheduleLostMission(droneId);
+
+                sendReply("FAULT", drone.address, drone.port);
+                sendReply("ACK", addr, port);
+                break;
+            }
+            case "droneRecovered": {
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo drone = droneRegistry.get(droneId);
+
+                if (drone != null) {
+                    drone.state = "IDLE";
+                }
+
+                System.out.println("Scheduler: Drone " + droneId + " recovered.");
+
+                tryDispatch(); // now safe to reuse drone
+                break;
+            }
             default:
                 System.err.println("Scheduler: unknown message: " + parts[0]);
         }
     }
 
+    private void retrieveAndRescheduleLostMission(int droneId) {
+        FireEvent lostMission = droneActiveMission.remove(droneId);
+        if (lostMission != null) {
+            System.out.println("Scheduler: Re-queueing lost mission from Drone " + droneId);
+
+            assignedWaterPerZone.computeIfPresent(
+                    lostMission.getZoneId(),
+                    (k, v) -> (v - lostMission.getWaterRemaining() <= 0)
+                            ? null
+                            : v - lostMission.getWaterRemaining()
+            );
+
+            rescheduleUnfinishedFireEvent(lostMission);
+        }
+    }
 
     /**
      * Greedily assigns pending fire events to idle drones by pushing
@@ -242,9 +307,11 @@ public class Scheduler implements Runnable {
                         "Scheduler [%s]: Drone %d → Zone %d FULL (%dL)%n",
                         clock.getFormattedTime(), droneId,
                         mission.getZoneId(), waterToAssign);
+
             }
 
             pushMissionToDrone(drone, droneMission);
+            droneActiveMission.put(droneId, droneMission);
             updateSchedulerState(remainingWater);
         }
     }
@@ -363,6 +430,7 @@ public class Scheduler implements Runnable {
                 lowFireEventQueue.addFirst(event);
                 break;
         }
+        activeMissionCount++;
     }
 
     // =========== MISSION LIFECYCLE =========
@@ -397,6 +465,7 @@ public class Scheduler implements Runnable {
         }
 
         activeMissionCount--;
+        droneActiveMission.remove(droneId);
         updateSchedulerState(0);
         tryDispatch();
     }
@@ -482,4 +551,30 @@ public class Scheduler implements Runnable {
         running = false;
         socket.close();
     }
+
+    private boolean anyActiveFires() {
+        return !highFireEventQueue.isEmpty()
+                || !moderateFireEventQueue.isEmpty()
+                || !lowFireEventQueue.isEmpty()
+                || !droneActiveMission.isEmpty();
+    }
+
+    private void checkReturnHome(){
+        if (!anyActiveFires() && activeMissionCount == 0) {
+            for (DroneInfo drone : droneRegistry.values()) {
+                if ("IDLE".equals(drone.state) || "RETURNING".equals(drone.state)) {
+                    try {
+                        String msg = "ASSIGN_MISSION|RETURN_HOME";
+                        byte[] data = msg.getBytes();
+                        socket.send(new DatagramPacket(data, data.length, drone.address, drone.port));
+                        System.out.printf("Scheduler: Drone %d returning home%n", drone.droneId);
+                    } catch (Exception e) {
+                        System.err.println("Scheduler send error: " + e.getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+
 }

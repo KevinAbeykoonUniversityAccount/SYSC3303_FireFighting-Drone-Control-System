@@ -117,12 +117,27 @@ public class FireIncidentSubsystem implements Runnable {
                     System.out.printf("FireIncidentSubsystem: Sending Event: %s%n", event);
 
                     // CHANGED: was scheduler.receiveFireEvent(event)
-                    sendAndReceive("receiveFireEvent|"
-                            + event.getZoneId()            + "|"
-                            + event.getEventType()          + "|"
-                            + event.getSeverity().name()    + "|"
-                            + event.getSecondsFromStart());
-
+                    if(eventType.equals("DRONE_SOFTFAULT")) {
+                        sendAndReceive("droneFaulted|"
+                                + event.getZoneId() + "|"
+                                + "droneFaulted" + "|"
+                                + event.getSeverity().name() + "|"
+                                + event.getSecondsFromStart());
+                    }
+                    else if(eventType.equals("DRONE_HARDFAULT")){
+                        sendAndReceive("droneHardFault|"
+                                + event.getZoneId() + "|"
+                                + event.getEventType() + "|"
+                                + event.getSeverity().name() + "|"
+                                + event.getSecondsFromStart());
+                    }
+                    else{
+                        sendAndReceive("receiveFireEvent|"
+                                + event.getZoneId() + "|"
+                                + event.getEventType() + "|"
+                                + event.getSeverity().name() + "|"
+                                + event.getSecondsFromStart());
+                    }
                 } catch (Exception e) {
                     System.err.println("FireIncidentSubsystem Error Parsing Line: " + line);
                     e.printStackTrace();

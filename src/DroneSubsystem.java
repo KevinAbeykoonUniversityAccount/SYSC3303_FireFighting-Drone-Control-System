@@ -25,7 +25,8 @@ public class DroneSubsystem extends Thread {
         COMPLETED_MISSION,
         REFUELED,
         FAULT,
-        DECOMMISSION
+        DECOMMISSION,
+
     }
 
     public enum DroneState {
@@ -48,7 +49,7 @@ public class DroneSubsystem extends Thread {
 
     // Drone State
     private final int droneId;
-    private DroneState droneState;
+    private volatile DroneState droneState;
 
     private volatile FireEvent incomingMission;
     private FireEvent currentMission;
@@ -69,6 +70,7 @@ public class DroneSubsystem extends Thread {
     private final DatagramSocket socket;  // bound to listenPort; used for both send and receive
     private final InetAddress schedulerAddr;
     private final int         schedulerPort;
+
 
     /**
      * @param droneId        unique drone identifier
@@ -92,6 +94,8 @@ public class DroneSubsystem extends Thread {
         this.clock           = SimulationClock.getInstance();
         this.incomingMission = null;
         this.currentMission  = null;
+
+
     }
 
     // Getters and Setters
@@ -217,10 +221,11 @@ public class DroneSubsystem extends Thread {
      */
     public void moveDrone() throws InterruptedException {
         while (xGridLocation != targetX || yGridLocation != targetY) {
-            if (missionInterrupted) {
-                missionInterrupted = false;
+            if (missionInterrupted || droneState == DroneState.FAULTED) {
+                System.out.printf("Drone %d: movement stopped due to fault%n", droneId);
                 return;
             }
+            if (droneState == DroneState.DECOMMISSIONED) return;
 
             if      (targetX > xGridLocation) xGridLocation++;
             else if (targetX < xGridLocation) xGridLocation--;
@@ -228,7 +233,13 @@ public class DroneSubsystem extends Thread {
             if      (targetY > yGridLocation) yGridLocation++;
             else if (targetY < yGridLocation) yGridLocation--;
 
-            sleep(1000);  // one simulated second per cell
+            // one simulated second per cell
+            try {
+                sleep(1000);
+            } catch (InterruptedException e) {
+                System.out.printf("Drone %d: movement interrupted%n", droneId);
+                return;
+            }
 
             sendOnly("locationUpdate|" + droneId + "|"
                     + xGridLocation + "|" + yGridLocation + "|"
@@ -238,7 +249,9 @@ public class DroneSubsystem extends Thread {
         hasTarget = false;
         System.out.printf("Drone %d: Arrived at (%d, %d)%n",
                 droneId, xGridLocation, yGridLocation);
-        handleEvent(droneEvents.ARRIVED);
+        if (droneState != DroneState.DECOMMISSIONED) {
+            handleEvent(droneEvents.ARRIVED);
+        }
     }
 
 
@@ -258,12 +271,36 @@ public class DroneSubsystem extends Thread {
             return 0;
         }
 
+        if (missionInterrupted || droneState == DroneState.FAULTED) return 0;
+        if (droneState == DroneState.DECOMMISSIONED) return 0;
+
         System.out.printf("Drone %d: Extinguishing — dropping %dL [sim time %s]%n",
                 droneId, waterToDrop, clock.getFormattedTime());
 
-        sleep((long)(NOZZLE_OPEN_TIME  * 1000));
-        sleep((long)(waterToDrop / FLOW_RATE * 1000));
-        sleep((long)(NOZZLE_CLOSE_TIME * 1000));
+        try {
+            sleep((long)(NOZZLE_OPEN_TIME * 1000));
+        } catch (InterruptedException e) {
+            return 0;
+        }
+
+        if (missionInterrupted || droneState == DroneState.FAULTED) return 0;
+        if (droneState == DroneState.DECOMMISSIONED) return 0;
+
+        try {
+            sleep((long)(waterToDrop / FLOW_RATE * 1000));
+        } catch (InterruptedException e) {
+            return 0;
+        }
+
+        if (missionInterrupted || droneState == DroneState.FAULTED) return 0;
+        if (droneState == DroneState.DECOMMISSIONED) return 0;
+
+
+        try {
+            sleep((long)(NOZZLE_CLOSE_TIME * 1000));
+        } catch (InterruptedException e) {
+            return 0;
+        }
 
         waterRemaining -= waterToDrop;
         System.out.printf("Drone %d: Extinguishing done. Water remaining: %dL%n",
@@ -281,7 +318,11 @@ public class DroneSubsystem extends Thread {
     public void refillWater() throws InterruptedException {
         System.out.printf("Drone %d: Refilling at base [sim time %s]%n",
                 droneId, clock.getFormattedTime());
-        sleep(5000);
+        try {
+            sleep(5000);
+        } catch (InterruptedException e) {
+            return;
+        }
         waterRemaining = MAX_CAPACITY;
         System.out.printf("Drone %d: Refill complete (%dL) [sim time %s]%n",
                 droneId, waterRemaining, clock.getFormattedTime());
@@ -291,14 +332,19 @@ public class DroneSubsystem extends Thread {
 
     // ========== STATE MACHINE ===========
     public void handleEvent(droneEvents event) {
+        if (droneState == DroneState.FAULTED && event != droneEvents.DECOMMISSION) {
+            return;
+        }
+
         try {
             switch (event) {
 
                 // ── Scheduler pushed a new mission ─────────────────────────
                 case NEW_MISSION: {
+                    missionInterrupted = false;
+
                     // If already en-route, reschedule the abandoned mission
-                    if (droneState == DroneState.ONROUTE && currentMission != null) {
-                        sendOnly("rescheduleFireEvent|"
+                    if (droneState == DroneState.ONROUTE && currentMission != null && !missionInterrupted) {                        sendOnly("rescheduleFireEvent|"
                                 + currentMission.getZoneId()         + "|"
                                 + currentMission.getEventType()       + "|"
                                 + currentMission.getSeverity().name() + "|"
@@ -358,25 +404,48 @@ public class DroneSubsystem extends Thread {
                     } else {
                         setState(DroneState.IDLE);
                     }
+
                     break;
                 }
 
                 // ── Fault / recovery ───────────────────────────────────────
+
                 case FAULT: {
+                    System.out.printf("Drone %d: FAULTED — interrupting%n", droneId);
+
                     setState(DroneState.FAULTED);
-                    System.out.printf("Drone %d: FAULTED — recovering%n", droneId);
-                    sleep(1000);
-                    setState(DroneState.IDLE);
+                    missionInterrupted = true;
+                    sendOnly("droneFaulted|" + droneId);
+
+                    // Recovery in separate thread
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(10000); // recovery time
+                            synchronized (DroneSubsystem.this) {
+                                missionInterrupted = false;
+                                setState(DroneState.IDLE);
+                                sendOnly("droneRecovered|" + droneId);
+                                notifyAll();
+                                System.out.printf("Drone %d: Recovered from soft fault%n", droneId);
+                            }
+                        } catch (InterruptedException ignored) {}
+                    }, "drone-" + droneId + "-recovery").start();
+
                     break;
                 }
 
                 // ── Decommission ───────────────────────────────────────────
                 case DECOMMISSION: {
                     setState(DroneState.DECOMMISSIONED);
+
                     System.out.printf("Drone %d: Decommissioned%n", droneId);
+                    this.interrupt();
+
+                    synchronized (this) {
+                        notifyAll();
+                    }
                     break;
                 }
-
                 default:
                     break;
             }
@@ -385,109 +454,6 @@ public class DroneSubsystem extends Thread {
         }
     }
 
-    /**
-     public void performAction() {
-     try {
-     switch (droneState) {
-     case IDLE:
-     FireEvent mission = requestMission();
-     if (mission != null) {
-     this.currentMission = mission;
-     setState(DroneState.ONROUTE);
-     } else {
-     setState(DroneState.REFILLING); // GOTO_REFILL response
-     }
-     break;
-
-     case ONROUTE:
-     if (currentMission != null) {
-     int targetX = getXFromZone(currentMission.getZoneId());
-     int targetY = getYFromZone(currentMission.getZoneId());
-     System.out.printf("Drone %d: Moving to Zone %d at (%d, %d)%n",
-     droneId, currentMission.getZoneId(), targetX, targetY);
-     moveDrone(targetX, targetY);
-     setState(DroneState.EXTINGUISHING);
-     } else {
-     setState(DroneState.IDLE);
-     }
-     break;
-
-     case EXTINGUISHING:
-     int waterNeeded = currentMission.getWaterRemaining();
-     int waterUsed   = extinguishFire(waterNeeded);
-     // CHANGED: was scheduler.missionCompleted(...)
-     sendOnly("missionCompleted|" + droneId + "|"
-     + currentMission.getZoneId() + "|" + waterUsed);
-     currentMission = null;
-     droneState     = waterRemaining <= 0 ? DroneState.REFILLING : DroneState.IDLE;
-     break;
-
-     case REFILLING:
-     goForRefill();
-     break;
-
-     case FAULTED:
-     System.out.printf("Drone %d is faulted. Waiting for recovery...%n", droneId);
-     Thread.sleep(1000);
-     droneState = DroneState.IDLE;
-     break;
-
-     case DECOMMISSIONED:
-     System.out.printf("Drone %d is decommissioned.%n", droneId);
-     break;
-
-     default:
-     break;
-     }
-
-     } catch (InterruptedException e) {
-     Thread.currentThread().interrupt();
-     }
-     }*/
-
-    /**
-     * Sends requestMission to the scheduler and blocks until a mission,
-     * GOTO_REFILL, or an error is returned.
-     * CHANGED: was scheduler.requestMission(droneId)
-     */
-    /**private FireEvent requestMission() throws InterruptedException {
-        while (true) {
-            try {
-                String response = sendAndReceive(
-                        "requestMission|" + droneId + "|"
-                                + xGridLocation + "|" + yGridLocation + "|" + waterRemaining);
-
-                String[] parts = response.split("\\|");
-                switch (parts[0]) {
-                    case "MISSION": {
-                        // MISSION|zoneId|eventType|severity|waterAssigned|secondsFromStart
-                        FireEvent base = new FireEvent(
-                                Integer.parseInt(parts[1]),
-                                parts[2],
-                                parts[3],
-                                Integer.parseInt(parts[5]));
-                        return new FireEvent(base, Integer.parseInt(parts[4]));
-                    }
-                    case "GOTO_REFILL":
-                        return null;
-                    case "WAIT":
-                        Thread.sleep(500);
-                        break;
-                    default:
-                        System.err.println("Drone " + droneId + ": unexpected: " + response);
-                        Thread.sleep(200);
-                }
-            } catch (SocketTimeoutException e) {
-                System.out.println("Drone " + droneId + ": timeout on requestMission, retrying...");
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return null;
-            } catch (Exception e) {
-                System.err.println("Drone " + droneId + " requestMission error: " + e.getMessage());
-                Thread.sleep(500);
-            }
-        }
-    }*/
 
     @Override
     public void run() {
@@ -508,7 +474,7 @@ public class DroneSubsystem extends Thread {
                 try {
                     DatagramPacket pkt = new DatagramPacket(buf, buf.length);
                     socket.receive(pkt);
-                    String   msg   = new String(pkt.getData(), 0, pkt.getLength()).trim();
+                    String msg = new String(pkt.getData(), 0, pkt.getLength()).trim();
                     String[] parts = msg.split("\\|");
                     switch (parts[0]) {
                         case "ASSIGN_MISSION": {
@@ -522,14 +488,19 @@ public class DroneSubsystem extends Thread {
                         case "DECOMMISSION":
                             handleEvent(droneEvents.DECOMMISSION);
                             break;
+                        case "FAULT":
+                            handleEvent(droneEvents.FAULT);
+                            break;
                         default:
                             System.err.println("Drone " + droneId
                                     + ": unrecognised push: " + parts[0]);
+                            break;
+
                     }
                 } catch (SocketException e) {
                     break;  // socket closed on shutdown
                 } catch (Exception e) {
-                    System.err.println("Drone " + droneId + " listener: " + e.getMessage());
+                    //System.err.println("Drone " + droneId + " listener: " + e.getMessage());
                 }
             }
         }, "drone-" + droneId + "-listener");
@@ -540,9 +511,14 @@ public class DroneSubsystem extends Thread {
         while (droneState != DroneState.DECOMMISSIONED) {
             synchronized (this) {
                 while (incomingMission == null && droneState == DroneState.IDLE) {
-                    try { wait(); } catch (InterruptedException e) { return; }
+                    try {
+                        wait();
+                    } catch (InterruptedException e) {
+                        return;
+                    }
                 }
             }
+
             if (incomingMission != null) {
                 handleEvent(droneEvents.NEW_MISSION);
             }
@@ -551,4 +527,6 @@ public class DroneSubsystem extends Thread {
         socket.close();
         System.out.printf("Drone %d: Shut down%n", droneId);
     }
+
+
 }
