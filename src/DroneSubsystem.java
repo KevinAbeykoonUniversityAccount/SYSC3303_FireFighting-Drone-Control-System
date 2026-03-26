@@ -500,7 +500,7 @@ public class DroneSubsystem extends Thread {
                 } catch (SocketException e) {
                     break;  // socket closed on shutdown
                 } catch (Exception e) {
-                    //System.err.println("Drone " + droneId + " listener: " + e.getMessage());
+                    System.err.println("Drone " + droneId + " listener: " + e.getMessage());
                 }
             }
         }, "drone-" + droneId + "-listener");
