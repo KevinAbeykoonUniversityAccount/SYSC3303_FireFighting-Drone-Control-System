@@ -21,6 +21,7 @@ public class FireIncidentSubsystem implements Runnable {
     private static final int BUFFER_SIZE = 1024;
     private static final int TIMEOUT_MS  = 5000;
     private static final int MAX_RETRIES = 3;
+    private static final int CLOCK_SPEED = 60;
 
     // CHANGED: socket fields instead of Scheduler reference
     private final DatagramSocket socket;
@@ -37,7 +38,7 @@ public class FireIncidentSubsystem implements Runnable {
         this.socket.setSoTimeout(TIMEOUT_MS);
     }
 
-    // ── UDP helpers ───────────────────────────────────────────────────────
+    // ==== UDP helpers ====
 
     private String sendAndReceive(String message) throws Exception {
         byte[]         data    = message.getBytes();
@@ -75,12 +76,12 @@ public class FireIncidentSubsystem implements Runnable {
 
     @Override
     public void run() {
-        boolean isFirstLine = true;
-
         System.out.println("Starting FireIncidentSubsystem - Reading: " + inputFileName + "...\n\n");
 
         try (BufferedReader br = new BufferedReader(new FileReader(inputFileName))) {
             String line;
+            boolean clockStarted = false;
+            boolean isFirstLine  = true;
 
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty() || line.startsWith("#")) continue;
@@ -96,19 +97,25 @@ public class FireIncidentSubsystem implements Runnable {
                     int seconds = Integer.parseInt(timeParts[2]);
                     int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds;
 
-                    if (eventTimeSeconds > getSchedulerTime()) {
-                        System.out.printf("FireIncidentSubsystem: Event at %s, waiting...%n",
-                                timeStr);
-                        while (getSchedulerTime() < eventTimeSeconds) {
-                            Thread.sleep(200);
-                        }
+
+                    // Start the Scheduler's clock at the first event's timestamp
+                    // so no real time is wasted between program startups
+                    if (!clockStarted) {
+                        sendAndReceive("startClock|" + eventTimeSeconds + "|" + CLOCK_SPEED);
+                        clockStarted = true;
+                    }
+
+                    // Wait until the Scheduler's clock reaches this event's time
+                    while (getSchedulerTime() < eventTimeSeconds) {
+                        Thread.sleep(200);
                     }
 
                     int    zoneId    = Integer.parseInt(parts[1].trim());
                     String eventType = parts[2].trim();
                     String severity  = parts[3].trim();
+                    FaultType fault  = parts.length > 4 ? FaultType.from(parts[4].trim()) : FaultType.NONE;
 
-                    FireEvent event = new FireEvent(zoneId, eventType, severity, eventTimeSeconds);
+                    FireEvent event = new FireEvent(zoneId, eventType, severity, eventTimeSeconds, fault);
 
                     System.out.printf("FireIncidentSubsystem: Sending Event: %s%n", event);
 
@@ -117,7 +124,8 @@ public class FireIncidentSubsystem implements Runnable {
                             + event.getZoneId()            + "|"
                             + event.getEventType()          + "|"
                             + event.getSeverity().name()    + "|"
-                            + event.getSecondsFromStart());
+                            + event.getSecondsFromStart()   + "|"
+                            + event.getFaultType().name());
 
                 } catch (Exception e) {
                     System.err.println("FireIncidentSubsystem Error Parsing Line: " + line);

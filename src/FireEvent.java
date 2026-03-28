@@ -29,12 +29,14 @@ public class FireEvent{
     private int waterRequired;
     private int secondsFromStart;
     private long fireIncidentStartTime; // Real-time when simulation started
+    private FaultType faultType = FaultType.NONE;
 
 
-    public FireEvent(int zoneId, String eventType, String severity, int secondsFromStart) {
+    public FireEvent(int zoneId, String eventType, String severity, int secondsFromStart, FaultType faultType) {
         this.zoneId = zoneId;
         this.eventType = eventType;
         this.secondsFromStart = secondsFromStart;
+        this.faultType = faultType;
 
         switch(severity.toUpperCase()){
             case "LOW":
@@ -71,6 +73,7 @@ public class FireEvent{
         this.waterRemaining = assignedWater;
         this.secondsFromStart = original.secondsFromStart;
         this.fireIncidentStartTime = original.fireIncidentStartTime;
+        this.faultType            = original.faultType;
     }
 
     public int getZoneId() {
@@ -84,6 +87,8 @@ public class FireEvent{
     public FireSeverity getSeverity() {
         return severity;
     }
+
+    public FaultType getFaultType() { return faultType; }
 
     public void setWaterRequired(int waterRequired) {
         this.waterRequired = waterRequired;

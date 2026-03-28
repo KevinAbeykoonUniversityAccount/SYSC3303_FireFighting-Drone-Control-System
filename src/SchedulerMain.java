@@ -9,17 +9,10 @@ import java.io.*;
  */
 public class SchedulerMain {
     public static void main(String[] args) throws Exception {
-        int speed = 60;
-
-        SimulationClock clock = SimulationClock.getInstance();
-        clock.setClockSpeedMultiplier(speed);
-        new Thread(clock, "SimulationClock").start();
-
         Scheduler scheduler = new Scheduler();
         new Thread(scheduler, "Scheduler").start();
 
-        System.out.println("Scheduler running on port " + Scheduler.PORT
-                + "  Clock speed: x" + speed);
+        System.out.println("Scheduler running on port " + Scheduler.PORT);
 
 
         // Launch GUI on the Swing event thread

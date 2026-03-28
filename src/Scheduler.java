@@ -50,6 +50,7 @@ Scheduler implements Runnable {
      * Zone definitions used to compute centre coordinates for dispatch.
      */
     private final Map<Integer, Zone> zones;
+    private final Map<Integer, Deque<FireEvent>> pendingFiresByZone = new HashMap<>();
 
     // ======= COUNTERS & STATE ============
     private final SimulationClock clock;
@@ -62,6 +63,8 @@ Scheduler implements Runnable {
     private final DatagramSocket socket;
     private volatile boolean running = true;
 
+
+    private final Map<Integer, FireEvent> droneActiveMission = new HashMap<>();
 
     public Scheduler() throws SocketException {
         highFireEventQueue = new LinkedList<>();
@@ -107,6 +110,16 @@ Scheduler implements Runnable {
             throws Exception {
         String[] parts = message.split("\\|");
         switch (parts[0]) {
+            case "startClock": {
+                int speed        = Integer.parseInt(parts[2]);
+                clock.setClockSpeedMultiplier(speed);
+                clock.setSimulationStartTime(0, 0, 0);
+                new Thread(clock, "SimulationClock").start();
+                sendReply("ACK", addr, port);
+                System.out.printf("Scheduler: Clock started at %s (x%d)%n",
+                        clock.getFormattedTime(), speed);
+                break;
+            }
 
             case "registerDrone": {
                 // registerDrone|droneId|x|y|water|listenPort
@@ -129,12 +142,13 @@ Scheduler implements Runnable {
             }
 
             case "receiveFireEvent": {
-                // receiveFireEvent|zoneId|eventType|severity|secondsFromStart
+                FaultType fault = parts.length > 5 ? FaultType.from(parts[5]) : FaultType.NONE;
                 FireEvent event = new FireEvent(
                         Integer.parseInt(parts[1]),
                         parts[2],
                         parts[3],
-                        Integer.parseInt(parts[4]));
+                        Integer.parseInt(parts[4]),
+                        fault);           // ← pass fault into FireEvent
                 receiveFireEvent(event);
                 sendReply("ACK", addr, port);
                 break;
@@ -181,12 +195,13 @@ Scheduler implements Runnable {
 
             // Drone returns an interrupted mission for re-queuing
             case "rescheduleFireEvent": {
-                // rescheduleFireEvent|zoneId|eventType|severity|waterRemaining|secondsFromStart
+                FaultType fault = parts.length > 5 ? FaultType.from(parts[5]) : FaultType.NONE;
                 FireEvent event = new FireEvent(
                         Integer.parseInt(parts[1]),
                         parts[2],
                         parts[3],
-                        Integer.parseInt(parts[5]));
+                        Integer.parseInt(parts[4]),
+                        fault);
 
                 // The drone reports how much water the fire still needs
                 int waterStillNeeded = Integer.parseInt(parts[4]);
@@ -205,10 +220,87 @@ Scheduler implements Runnable {
                 break;
             }
 
+            // Soft fault
+            case "droneFaulted": {
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo drone = droneRegistry.get(droneId);
+                if (drone != null) drone.state = "FAULTED";
+
+                System.out.printf("Scheduler [%s]: Drone %d SOFT FAULT — re-queuing mission%n",
+                        clock.getFormattedTime(), droneId);
+
+                activeMissionCount = Math.max(0, activeMissionCount - 1);
+                retrieveAndRescheduleLostMission(droneId);
+
+                // ACK only — do NOT send FAULT back to the drone.
+                // The drone manages its own recovery and will call droneRecovered.
+                sendReply("ACK", addr, port);
+                currentState = SchedulerState.FAULT_HANDLING;
+                break;
+            }
+
+            // Hard fault
+            case "droneHardFault": {
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo drone = droneRegistry.get(droneId);
+
+                System.out.printf("Scheduler [%s]: Drone %d HARD FAULT — decommissioning%n",
+                        clock.getFormattedTime(), droneId);
+
+                if (drone != null) drone.state = "DECOMMISSIONED";
+
+                activeMissionCount = Math.max(0, activeMissionCount - 1);
+                retrieveAndRescheduleLostMission(droneId);
+
+                // Tell DroneSubsystem to shut this drone down permanently.
+                // DECOMMISSION|droneId so DroneSubsystem can route it.
+                if (drone != null) {
+                    sendReply("DECOMMISSION|" + droneId, drone.address, drone.port);
+                }
+
+                sendReply("ACK", addr, port);
+                currentState = SchedulerState.FAULT_HANDLING;
+                tryDispatch();
+                break;
+            }
+
+            // Soft fault recovery
+            case "droneRecovered": {
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo drone = droneRegistry.get(droneId);
+                if (drone != null) drone.state = "IDLE";
+                System.out.printf("Scheduler [%s]: Drone %d recovered — IDLE%n",
+                        clock.getFormattedTime(), droneId);
+                updateSchedulerState(0);
+                tryDispatch();
+                break;
+            }
+
             default:
                 System.err.println("Scheduler: unknown message: " + parts[0]);
         }
     }
+
+    /**
+     * Looks up the mission that was active on the faulted drone, reduces
+     * the assignedWater tracking, and re-queues it at the front of its
+     * priority queue so another drone can pick it up.
+     *
+     * @param droneId The specified drone
+     */
+    private void retrieveAndRescheduleLostMission(int droneId) {
+        FireEvent lost = droneActiveMission.remove(droneId);
+        if (lost != null) {
+            System.out.printf("Scheduler: Re-queuing lost mission from Drone %d"
+                    + " (Zone %d)%n", droneId, lost.getZoneId());
+            assignedWaterPerZone.computeIfPresent(
+                    lost.getZoneId(),
+                    (k, v) -> (v - lost.getWaterRemaining() <= 0)
+                            ? null : v - lost.getWaterRemaining());
+            rescheduleUnfinishedFireEvent(lost);
+        }
+    }
+
 
 
     /**
@@ -259,6 +351,7 @@ Scheduler implements Runnable {
                         mission.getZoneId(), waterToAssign);
             }
 
+            droneActiveMission.put(droneId, droneMission);
             pushMissionToDrone(drone, droneMission);
             updateSchedulerState(remainingWater);
         }
@@ -273,12 +366,13 @@ Scheduler implements Runnable {
     private void pushMissionToDrone(DroneInfo drone, FireEvent mission) {
         try {
             String msg = "ASSIGN_MISSION|"
-                    + drone.droneId             + "|"   // ← add this
-                    + mission.getZoneId()        + "|"
-                    + mission.getEventType()     + "|"
-                    + mission.getSeverity().name() + "|"
-                    + mission.getWaterRemaining() + "|"
-                    + mission.getSecondsFromStart();
+                    + drone.droneId                  + "|"
+                    + mission.getZoneId()             + "|"
+                    + mission.getEventType()          + "|"
+                    + mission.getSeverity().name()    + "|"
+                    + mission.getWaterRemaining()     + "|"
+                    + mission.getSecondsFromStart()   + "|"
+                    + mission.getFaultType().name();
             byte[] data = msg.getBytes();
             socket.send(new DatagramPacket(
                     data, data.length, drone.address, drone.port));
@@ -321,6 +415,21 @@ Scheduler implements Runnable {
     // =========== FIRE QUEUE MANAGEMENT ===========
 
     public synchronized void receiveFireEvent(FireEvent event) {
+        int zoneId = event.getZoneId();
+
+        // Check if this zone already has an active or queued fire
+        boolean zoneAlreadyBurning = isZoneActive(zoneId);
+
+        if (zoneAlreadyBurning) {
+            // Hold it until the current fire is resolved
+            pendingFiresByZone
+                    .computeIfAbsent(zoneId, k -> new LinkedList<>())
+                    .add(event);
+            System.out.printf("Scheduler [%s]: Zone %d already has an active fire " +
+                    "— queuing new event%n", clock.getFormattedTime(), zoneId);
+            return;
+        }
+
         System.out.printf("Scheduler [%s]: Fire at Zone %d (severity=%s)%n",
                 clock.getFormattedTime(), event.getZoneId(), event.getSeverity());
         enqueue(event);
@@ -328,6 +437,19 @@ Scheduler implements Runnable {
             currentState = SchedulerState.DISPATCHING;
         }
         tryDispatch();
+    }
+
+    /** Returns true if this zone has a fire currently queued or being serviced. */
+    private boolean isZoneActive(int zoneId) {
+        // Check the priority queues
+        for (FireEvent e : highFireEventQueue)
+            if (e.getZoneId() == zoneId) return true;
+        for (FireEvent e : moderateFireEventQueue)
+            if (e.getZoneId() == zoneId) return true;
+        for (FireEvent e : lowFireEventQueue)
+            if (e.getZoneId() == zoneId) return true;
+        // Check currently assigned missions
+        return assignedWaterPerZone.containsKey(zoneId);
     }
 
     private void enqueue(FireEvent event) {
@@ -341,6 +463,18 @@ Scheduler implements Runnable {
             default:
                 lowFireEventQueue.add(event);
                 break;
+        }
+    }
+
+    private void releasePendingFireForZone(int zoneId) {
+        Deque<FireEvent> pending = pendingFiresByZone.get(zoneId);
+        if (pending != null && !pending.isEmpty()) {
+            FireEvent next = pending.poll();
+            System.out.printf("Scheduler [%s]: Zone %d clear — releasing held fire event%n",
+                    clock.getFormattedTime(), zoneId);
+            enqueue(next);
+            if (currentState == SchedulerState.IDLE)
+                currentState = SchedulerState.DISPATCHING;
         }
     }
 
@@ -415,6 +549,7 @@ Scheduler implements Runnable {
         activeMissionCount--;
         updateSchedulerState(0);
         tryDispatch();
+        releasePendingFireForZone(zoneId);
     }
 
     public synchronized void droneRefilling(int droneId) {

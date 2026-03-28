@@ -263,17 +263,31 @@ public class MapPanel extends JPanel {
                     g2d.setColor(new Color(0, 0, 0, 50));
                     g2d.fillOval(x - 8, y - 8, 20, 20);
 
-                    // Color by state - CHANGED: DroneSubsystem.DroneState → String comparison
+                    // Pick color by state
+                    Color droneColor;
                     switch (drone.state) {
-                        case "ONROUTE":       g2d.setColor(Color.BLUE);    break;
-                        case "EXTINGUISHING": g2d.setColor(Color.GREEN);   break;
-                        case "REFILLING":     g2d.setColor(Color.CYAN);    break;
-                        case "FAULTED":       g2d.setColor(Color.MAGENTA); break;
-                        default:              g2d.setColor(Color.BLACK);   break; // IDLE
+                        case "ONROUTE":        droneColor = Color.BLUE;  break;
+                        case "EXTINGUISHING":  droneColor = Color.GREEN; break;
+                        case "REFILLING":      droneColor = Color.CYAN;  break;
+                        case "FAULTED":        droneColor = new Color(255, 191, 0); break; // amber — soft fault
+                        case "DECOMMISSIONED": droneColor = new Color(200, 50, 50); break; // red   — hard fault
+                        default:               droneColor = Color.BLACK;  // IDLE
                     }
 
                     // Draw drone circle
+                    g2d.setColor(droneColor);
                     g2d.fillOval(x - 8, y - 8, 16, 16);
+
+
+                    // Draw an X over decommissioned drones so they are visually distinct
+                    // and clearly not active — they stay at their last known position
+                    if ("DECOMMISSIONED".equals(drone.state)) {
+                        g2d.setColor(Color.WHITE);
+                        g2d.setStroke(new BasicStroke(2));
+                        g2d.drawLine(x - 5, y - 5, x + 5, y + 5);
+                        g2d.drawLine(x + 5, y - 5, x - 5, y + 5);
+                        g2d.setStroke(new BasicStroke(1)); // reset
+                    }
 
                     // Draw drone ID
                     g2d.setColor(Color.WHITE);
@@ -301,9 +315,9 @@ public class MapPanel extends JPanel {
 
         // Semi-transparent background
         g2d.setColor(new Color(255, 255, 255, 220));
-        g2d.fillRect(legendX, legendY, 200, 120);
+        g2d.fillRect(legendX, legendY, 200, 160);
         g2d.setColor(Color.BLACK);
-        g2d.drawRect(legendX, legendY, 200, 120);
+        g2d.drawRect(legendX, legendY, 200, 160);
 
         g2d.setFont(new Font("Arial", Font.BOLD, 12));
         g2d.drawString("Drone States", legendX + 10, legendY + 20);
@@ -334,11 +348,17 @@ public class MapPanel extends JPanel {
         g2d.setColor(Color.BLACK);
         g2d.drawString("REFILLING", legendX + 30, legendY + 100);
 
-        // FAULTED
-        g2d.setColor(Color.MAGENTA);
+        // FAULTED (soft)
+        g2d.setColor(new Color(255, 191, 0));
         g2d.fillOval(legendX + 12, legendY + 110, 12, 12);
         g2d.setColor(Color.BLACK);
-        g2d.drawString("FAULTED", legendX + 30, legendY + 120);
+        g2d.drawString("SOFT FAULT", legendX + 30, legendY + 120);
+
+        // DECOMMISSIONED (hard)
+        g2d.setColor(new Color(200, 50, 50));
+        g2d.fillOval(legendX + 12, legendY + 130, 12, 12);
+        g2d.setColor(Color.BLACK);
+        g2d.drawString("HARD FAULT (offline)", legendX + 30, legendY + 140);
     }
 
     // Zone class

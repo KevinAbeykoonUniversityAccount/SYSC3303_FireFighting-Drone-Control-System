@@ -23,10 +23,6 @@ public class DroneMain {
             System.exit(1);
         }
 
-        SimulationClock clock = SimulationClock.getInstance();
-        clock.setClockSpeedMultiplier(speed);
-        new Thread(clock, "SimulationClock").start();
-
         // DroneSubsystem owns the socket and manages all DroneMachine instances
         DroneSubsystem subsystem = new DroneSubsystem(ids, host, Scheduler.PORT);
         subsystem.setName("DroneSubsystem");

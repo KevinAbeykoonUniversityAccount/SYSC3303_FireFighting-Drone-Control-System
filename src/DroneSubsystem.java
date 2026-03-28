@@ -137,6 +137,47 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         }
     }
 
+    // ==== Fault Lifecycle ====
+
+    /**
+     * Soft fault — drone stuck mid-flight.
+     * Scheduler re-queues the mission and marks the drone FAULTED.
+     * Drone recovers independently and calls onDroneRecovered.
+     */
+    @Override
+    public void onSoftFault(int droneId) {
+        try {
+            sendAndReceive("droneFaulted|" + droneId);
+        } catch (Exception e) {
+            System.err.println("DroneSubsystem: droneFaulted failed: "
+                    + e.getMessage());
+        }
+    }
+
+    /**
+     * Hard fault — nozzle jammed.
+     * Scheduler decommissions the drone and re-queues the mission.
+     * The Scheduler will send back DECOMMISSION|droneId.
+     */
+    @Override
+    public void onHardFault(int droneId) {
+        try {
+            sendAndReceive("droneHardFault|" + droneId);
+        } catch (Exception e) {
+            System.err.println("DroneSubsystem: droneHardFault failed: "
+                    + e.getMessage());
+        }
+    }
+
+
+    /**
+     * Drone recovered from a soft fault — tell Scheduler it is IDLE again.
+     */
+    @Override
+    public void onDroneRecovered(int droneId) {
+        sendOnly("droneRecovered|" + droneId);
+    }
+
     // ==== Startup registration ====
 
     /**
@@ -162,7 +203,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         }
     }
 
-    // ── Inbound packet routing ────────────────────────────────────────────
+    // ==== Inbound packet routing ====
 
     /**
      * Parses an incoming Scheduler packet and routes it to the right drone.
@@ -176,8 +217,6 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         switch (parts[0]) {
 
             case "ASSIGN_MISSION": {
-                // parts: [1]=droneId [2]=zoneId [3]=eventType [4]=severity
-                //        [5]=waterAssigned [6]=secondsFromStart
                 int droneId = Integer.parseInt(parts[1]);
                 DroneMachine drone = drones.get(droneId);
                 if (drone == null) {
@@ -188,11 +227,13 @@ public class DroneSubsystem extends Thread implements DroneCallback {
                         Integer.parseInt(parts[2]),
                         parts[3],
                         parts[4],
-                        Integer.parseInt(parts[6]));
+                        Integer.parseInt(parts[6]),
+                        FaultType.NONE);              // ← satisfies the constructor, fault travels separately
                 FireEvent mission = new FireEvent(base, Integer.parseInt(parts[5]));
-                System.out.printf("DroneSubsystem: Routing mission to Drone %d → Zone %d%n",
-                        droneId, mission.getZoneId());
-                drone.receiveMissionPush(mission);
+                FaultType fault   = parts.length > 7 ? FaultType.from(parts[7]) : FaultType.NONE;
+                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d [fault=%s]%n",
+                        droneId, mission.getZoneId(), fault);
+                drone.receiveMissionPush(mission, fault);
                 break;
             }
 
@@ -209,8 +250,6 @@ public class DroneSubsystem extends Thread implements DroneCallback {
                 System.err.println("DroneSubsystem: ignored unexpected message: " + parts[0]);
         }
     }
-
-    // ── Thread entry point ────────────────────────────────────────────────
 
     @Override
     public void run() {
