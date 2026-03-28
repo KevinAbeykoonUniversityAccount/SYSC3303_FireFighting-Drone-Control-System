@@ -12,7 +12,13 @@ import java.util.*;
  * @author Kevin Abeykoon (101301971)
  * @author Aryan Kumar Singh (101299776)
  */
-public class Scheduler implements Runnable {
+public class
+
+
+
+
+
+Scheduler implements Runnable {
 
     // ========= CONSTANTS =======
     public static final int PORT = 6000;
@@ -102,7 +108,6 @@ public class Scheduler implements Runnable {
         String[] parts = message.split("\\|");
         switch (parts[0]) {
 
-            // ── Drone announces itself on startup ──────────────────────────
             case "registerDrone": {
                 // registerDrone|droneId|x|y|water|listenPort
                 int droneId = Integer.parseInt(parts[1]);
@@ -110,15 +115,19 @@ public class Scheduler implements Runnable {
                 int y = Integer.parseInt(parts[3]);
                 int water = Integer.parseInt(parts[4]);
                 int listenPort = Integer.parseInt(parts[5]);
+
+                // Remove any stale entry for this droneId from a previous run
+                droneRegistry.remove(droneId);
+
                 DroneInfo info = new DroneInfo(droneId, x, y, water, addr, listenPort);
                 droneRegistry.put(droneId, info);
                 System.out.printf("Scheduler: Drone %d registered at %s:%d%n",
                         droneId, addr.getHostAddress(), listenPort);
+                sendReply("ACK", addr, port);
                 tryDispatch();
                 break;
             }
 
-            // ── Fire event from FireIncidentSubsystem ──────────────────────
             case "receiveFireEvent": {
                 // receiveFireEvent|zoneId|eventType|severity|secondsFromStart
                 FireEvent event = new FireEvent(
@@ -138,18 +147,21 @@ public class Scheduler implements Runnable {
                         Integer.parseInt(parts[1]),
                         Integer.parseInt(parts[2]),
                         Integer.parseInt(parts[3]));
+                sendReply("ACK", addr, port);
                 break;
             }
 
             // Drone heading back to base
             case "droneRefilling": {
                 droneRefilling(Integer.parseInt(parts[1]));
+                sendReply("ACK", addr, port);
                 break;
             }
 
             // Drone refill complete, ready for missions
             case "droneRefillComplete": {
                 droneRefillComplete(Integer.parseInt(parts[1]));
+                sendReply("ACK", addr, port);
                 break;
             }
 
@@ -163,6 +175,7 @@ public class Scheduler implements Runnable {
                     info.y = Integer.parseInt(parts[3]);
                     info.state = parts[4];
                 }
+                sendReply("ACK", addr, port);
                 break;
             }
 
@@ -174,6 +187,7 @@ public class Scheduler implements Runnable {
                         parts[2],
                         parts[3],
                         Integer.parseInt(parts[5]));
+
                 // The drone reports how much water the fire still needs
                 int waterStillNeeded = Integer.parseInt(parts[4]);
                 int originalWater = event.getWaterRemaining();
@@ -181,6 +195,7 @@ public class Scheduler implements Runnable {
                     event.waterUsed(originalWater - waterStillNeeded);
                 }
                 rescheduleUnfinishedFireEvent(event);
+                sendReply("ACK", addr, port);
                 break;
             }
 
@@ -258,8 +273,9 @@ public class Scheduler implements Runnable {
     private void pushMissionToDrone(DroneInfo drone, FireEvent mission) {
         try {
             String msg = "ASSIGN_MISSION|"
-                    + mission.getZoneId() + "|"
-                    + mission.getEventType() + "|"
+                    + drone.droneId             + "|"   // ← add this
+                    + mission.getZoneId()        + "|"
+                    + mission.getEventType()     + "|"
                     + mission.getSeverity().name() + "|"
                     + mission.getWaterRemaining() + "|"
                     + mission.getSecondsFromStart();

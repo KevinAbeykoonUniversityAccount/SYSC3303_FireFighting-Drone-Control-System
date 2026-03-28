@@ -1,42 +1,49 @@
 @startuml
-[*] --> IDLE
+title UDP Message Flow — Drone Fire-Fighting System
 
-state IDLE
-IDLE : entry / log("Enter IDLE")
-IDLE : exit / log("Exit IDLE")
+participant "FireIncidentSubsystem" as FIS
+participant "Scheduler :6000" as SCH
+participant "Drone N" as DRN
 
-state DISPATCHING
-DISPATCHING : entry / log("Enter DISPATCHING")
-DISPATCHING : exit / log("Exit DISPATCHING")
+DRN -> SCH : registerDrone|droneId|x|y|water|listenPort
 
-state MONITORING
-MONITORING : entry / log("Enter MONITORING")
-MONITORING : exit / log("Exit MONITORING")
+FIS -> SCH : getTime
+SCH --> FIS : <simulationTimeSeconds>
 
-state REFILLING
-REFILLING : entry / log("Enter REFILLING")
-REFILLING : exit / log("Exit REFILLING")
+FIS -> SCH : receiveFireEvent|zoneId|eventType|severity|secondsFromStart
 
-state FAULT_HANDLING
-FAULT_HANDLING : entry / log("Enter FAULT_HANDLING")
-FAULT_HANDLING : exit / log("Exit FAULT_HANDLING")
+note over SCH : tryDispatch() selects\nclosest idle drone
 
-IDLE --> DISPATCHING : receiveFireEvent()\n(first fire arrives)
-DISPATCHING --> MONITORING : requestMission()\n[queues empty and activeMissionCount>0]
-DISPATCHING --> DISPATCHING : requestMission()\n[queues not empty]\nor receiveFireEvent()
-MONITORING --> DISPATCHING : receiveFireEvent()\n(new fire while drones active)
-MONITORING --> IDLE : missionCompleted()\n[last drone, queues empty]
-MONITORING --> MONITORING : missionCompleted()\n[still active drones, queues empty]
-IDLE --> REFILLING : droneRefilling()
-DISPATCHING --> REFILLING : droneRefilling()
-MONITORING --> REFILLING : droneRefilling()
-REFILLING --> IDLE : droneRefillComplete()\n[last refill, no active missions, queues empty]
-REFILLING --> DISPATCHING : droneRefillComplete()\n[last refill, queues not empty]
-REFILLING --> MONITORING : droneRefillComplete()\n[last refill, active missions exist, queues empty]
-REFILLING --> REFILLING : droneRefillComplete()\n[still refilling drones]
+SCH -> DRN : ASSIGN_MISSION|zoneId|eventType|severity|waterAssigned|secondsFromStart
 
-FAULT_HANDLING --> IDLE : fault resolved\n[no queues, no active missions]
-FAULT_HANDLING --> DISPATCHING : fault resolved\n[queues not empty]
-FAULT_HANDLING --> MONITORING : fault resolved\n[active missions exist]
-FAULT_HANDLING --> REFILLING : fault resolved\n[refilling drones exist]
+loop every cell moved
+    DRN -> SCH : locationUpdate|droneId|x|y|ONROUTE
+end
+
+alt higher-priority fire arrives mid-flight
+    SCH -> DRN : ASSIGN_MISSION|zoneId2|eventType|severity2|waterAssigned|secondsFromStart
+    DRN -> SCH : rescheduleFireEvent|zoneId|eventType|severity|waterRemaining|secondsFromStart
+    note over SCH : original mission re-queued\nat front of priority queue
+else no interrupt
+    note over DRN : continues to original zone
+end
+
+note over DRN : arrived at zone centre\nruns extinguishFire()
+
+DRN -> SCH : missionCompleted|droneId|zoneId|waterUsed
+
+alt tank empty
+    DRN -> SCH : droneRefilling|droneId
+    loop every cell moved back to base
+        DRN -> SCH : locationUpdate|droneId|x|y|RETURNING
+    end
+    note over DRN : refillWater() — 5s
+    DRN -> SCH : droneRefillComplete|droneId
+    note over SCH : DroneInfo → IDLE\ncalls tryDispatch()
+else water remaining
+    note over SCH : DroneInfo → IDLE\ncalls tryDispatch()
+end
+
+SCH -> DRN : DECOMMISSION
+
 @enduml

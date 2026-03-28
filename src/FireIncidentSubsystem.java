@@ -59,7 +59,6 @@ public class FireIncidentSubsystem implements Runnable {
         throw new Exception("No response after " + MAX_RETRIES + " attempts");
     }
 
-    // ── Clock polling (CHANGED: replaces local SimulationClock) ──────────
 
     /**
      * Asks the Scheduler for its current simulation time in seconds.
@@ -73,8 +72,6 @@ public class FireIncidentSubsystem implements Runnable {
             return 0;
         }
     }
-
-    // ── Main loop ─────────────────────────────────────────────────────────
 
     @Override
     public void run() {
@@ -99,7 +96,6 @@ public class FireIncidentSubsystem implements Runnable {
                     int seconds = Integer.parseInt(timeParts[2]);
                     int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds;
 
-                    // CHANGED: poll the scheduler's clock instead of a local clock
                     if (eventTimeSeconds > getSchedulerTime()) {
                         System.out.printf("FireIncidentSubsystem: Event at %s, waiting...%n",
                                 timeStr);
