@@ -67,10 +67,10 @@ public class DroneSubsystem extends Thread implements DroneCallback {
     private String sendAndReceive(String message) throws Exception {
         try (DatagramSocket tmp = new DatagramSocket()) {
             tmp.setSoTimeout(TIMEOUT_MS);
-            byte[]         data    = message.getBytes();
+            byte[] data = message.getBytes();
             DatagramPacket sendPkt = new DatagramPacket(data, data.length,
                     schedulerAddr, schedulerPort);
-            byte[]         buf     = new byte[BUFFER_SIZE];
+            byte[] buf = new byte[BUFFER_SIZE];
             DatagramPacket recvPkt = new DatagramPacket(buf, buf.length);
 
             for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -140,24 +140,9 @@ public class DroneSubsystem extends Thread implements DroneCallback {
     // ==== Fault Lifecycle ====
 
     /**
-     * Soft fault — drone stuck mid-flight.
-     * Scheduler re-queues the mission and marks the drone FAULTED.
-     * Drone recovers independently and calls onDroneRecovered.
-     */
-    @Override
-    public void onSoftFault(int droneId) {
-        try {
-            sendAndReceive("droneFaulted|" + droneId);
-        } catch (Exception e) {
-            System.err.println("DroneSubsystem: droneFaulted failed: "
-                    + e.getMessage());
-        }
-    }
-
-    /**
-     * Hard fault — nozzle jammed.
-     * Scheduler decommissions the drone and re-queues the mission.
-     * The Scheduler will send back DECOMMISSION|droneId.
+     * Hard fault only — nozzle jammed.
+     * Soft faults are handled entirely inside DroneMachine; no callback needed.
+     * Scheduler re-queues the mission and sends DECOMMISSION|droneId back.
      */
     @Override
     public void onHardFault(int droneId) {
@@ -168,7 +153,6 @@ public class DroneSubsystem extends Thread implements DroneCallback {
                     + e.getMessage());
         }
     }
-
 
     /**
      * Drone recovered from a soft fault — tell Scheduler it is IDLE again.
@@ -217,6 +201,8 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         switch (parts[0]) {
 
             case "ASSIGN_MISSION": {
+                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity
+                // [5]=water   [6]=seconds [7]=faultType
                 int droneId = Integer.parseInt(parts[1]);
                 DroneMachine drone = drones.get(droneId);
                 if (drone == null) {
@@ -234,6 +220,25 @@ public class DroneSubsystem extends Thread implements DroneCallback {
                 System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d [fault=%s]%n",
                         droneId, mission.getZoneId(), fault);
                 drone.receiveMissionPush(mission, fault);
+                break;
+            }
+
+            case "INJECT_FAULT": {
+                // Injects a fault into an already-active drone mid-action.
+                // The sleepInterruptibly tick picks it up within 200ms.
+                // [1]=droneId [2]=faultType
+                int droneId = Integer.parseInt(parts[1]);
+                DroneMachine drone = drones.get(droneId);
+                if (drone == null) {
+                    System.err.println("DroneSubsystem: unknown droneId " + droneId);
+                    return;
+                }
+                FaultType fault = parts.length > 2
+                        ? FaultType.from(parts[2]) : FaultType.NONE;
+                System.out.printf(
+                        "DroneSubsystem: Injecting %s fault into Drone %d mid-action%n",
+                        fault, droneId);
+                drone.injectFault(fault);
                 break;
             }
 

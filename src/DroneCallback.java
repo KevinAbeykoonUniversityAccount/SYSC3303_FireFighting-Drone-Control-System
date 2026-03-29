@@ -28,15 +28,8 @@ public interface DroneCallback {
     void onDroneRefillComplete(int droneId);
 
     /**
-     * Soft fault — drone is stuck mid-flight (DRONE_STUCK).
-     * Scheduler re-queues the mission; drone recovers on its own and
-     * calls onDroneRecovered when ready.
-     */
-    void onSoftFault(int droneId);
-
-    /**
-     * Hard fault — nozzle jammed during extinguishing (NOZZLE_FAULT).
-     * Scheduler decommissions the drone permanently and re-queues the mission.
+     * Hard fault only — nozzle jammed, drone is permanently shutting down.
+     * Scheduler re-queues the active mission and sends DECOMMISSION|droneId.
      */
     void onHardFault(int droneId);
 

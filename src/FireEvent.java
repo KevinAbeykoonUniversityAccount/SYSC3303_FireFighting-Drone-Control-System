@@ -90,6 +90,9 @@ public class FireEvent{
 
     public FaultType getFaultType() { return faultType; }
 
+    /** Clears the fault so a rescheduled event does not re-trigger a fault on the next drone. */
+    public void clearFault() { this.faultType = FaultType.NONE; }
+
     public void setWaterRequired(int waterRequired) {
         this.waterRequired = waterRequired;
     }

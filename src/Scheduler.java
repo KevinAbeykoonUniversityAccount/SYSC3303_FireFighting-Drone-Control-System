@@ -1,5 +1,6 @@
 import java.net.*;
 import java.util.*;
+import java.util.function.Consumer;
 
 /**
  * The Scheduler class is the central program of the fire fighting
@@ -12,13 +13,7 @@ import java.util.*;
  * @author Kevin Abeykoon (101301971)
  * @author Aryan Kumar Singh (101299776)
  */
-public class
-
-
-
-
-
-Scheduler implements Runnable {
+public class Scheduler implements Runnable {
 
     // ========= CONSTANTS =======
     public static final int PORT = 6000;
@@ -62,6 +57,17 @@ Scheduler implements Runnable {
     // =========== NETWORKING =======
     private final DatagramSocket socket;
     private volatile boolean running = true;
+
+    /** Callback that mirrors key log messages to the GUI System Log panel. */
+    private volatile Consumer<String> logCallback = null;
+
+    public void setLogCallback(Consumer<String> cb) { this.logCallback = cb; }
+
+    /** Prints to console and forwards to the GUI log (if wired). */
+    private void log(String msg) {
+        System.out.print(msg);
+        if (logCallback != null) logCallback.accept(msg.trim());
+    }
 
 
     private final Map<Integer, FireEvent> droneActiveMission = new HashMap<>();
@@ -185,9 +191,17 @@ Scheduler implements Runnable {
                 int droneId = Integer.parseInt(parts[1]);
                 DroneInfo info = droneRegistry.get(droneId);
                 if (info != null) {
-                    info.x = Integer.parseInt(parts[2]);
-                    info.y = Integer.parseInt(parts[3]);
-                    info.state = parts[4];
+                    int newX = Integer.parseInt(parts[2]);
+                    int newY = Integer.parseInt(parts[3]);
+                    String newState = parts[4];
+                    // Log meaningful mid-flight state transitions
+                    if ("FAULTED".equals(newState) && !"FAULTED".equals(info.state)) {
+                        log(String.format("Scheduler [%s]: Drone %d STUCK at (%d,%d) — pausing%n",
+                                clock.getFormattedTime(), droneId, newX, newY));
+                    }
+                    info.x     = newX;
+                    info.y     = newY;
+                    info.state = newState;
                 }
                 sendReply("ACK", addr, port);
                 break;
@@ -226,8 +240,8 @@ Scheduler implements Runnable {
                 DroneInfo drone = droneRegistry.get(droneId);
                 if (drone != null) drone.state = "FAULTED";
 
-                System.out.printf("Scheduler [%s]: Drone %d SOFT FAULT — re-queuing mission%n",
-                        clock.getFormattedTime(), droneId);
+                log(String.format("Scheduler [%s]: Drone %d SOFT FAULT — re-queuing mission%n",
+                        clock.getFormattedTime(), droneId));
 
                 activeMissionCount = Math.max(0, activeMissionCount - 1);
                 retrieveAndRescheduleLostMission(droneId);
@@ -244,8 +258,8 @@ Scheduler implements Runnable {
                 int droneId = Integer.parseInt(parts[1]);
                 DroneInfo drone = droneRegistry.get(droneId);
 
-                System.out.printf("Scheduler [%s]: Drone %d HARD FAULT — decommissioning%n",
-                        clock.getFormattedTime(), droneId);
+                log(String.format("Scheduler [%s]: Drone %d HARD FAULT — decommissioning%n",
+                        clock.getFormattedTime(), droneId));
 
                 if (drone != null) drone.state = "DECOMMISSIONED";
 
@@ -269,8 +283,8 @@ Scheduler implements Runnable {
                 int droneId = Integer.parseInt(parts[1]);
                 DroneInfo drone = droneRegistry.get(droneId);
                 if (drone != null) drone.state = "IDLE";
-                System.out.printf("Scheduler [%s]: Drone %d recovered — IDLE%n",
-                        clock.getFormattedTime(), droneId);
+                log(String.format("Scheduler [%s]: Drone %d recovered — IDLE%n",
+                        clock.getFormattedTime(), droneId));
                 updateSchedulerState(0);
                 tryDispatch();
                 break;
@@ -297,10 +311,10 @@ Scheduler implements Runnable {
                     lost.getZoneId(),
                     (k, v) -> (v - lost.getWaterRemaining() <= 0)
                             ? null : v - lost.getWaterRemaining());
+            lost.clearFault();  // prevent fault from re-triggering on the next assigned drone
             rescheduleUnfinishedFireEvent(lost);
         }
     }
-
 
 
     /**
@@ -334,21 +348,24 @@ Scheduler implements Runnable {
 
             FireEvent droneMission;
             if (remainingWater > 0) {
-                // Partial assignment — put the remainder back at the front
+                // Partial assignment — put the remainder back at the front.
+                // The fault belongs only to the first drone assigned; clear it
+                // from the remainder so subsequent drones don't also fault.
                 droneMission = new FireEvent(mission, waterToAssign);
                 mission.waterUsed(waterToAssign);
+                mission.clearFault();
                 rescheduleUnfinishedFireEvent(mission);
-                System.out.printf(
-                        "Scheduler [%s]: Drone %d → Zone %d PARTIAL"
+                log(String.format(
+                        "Scheduler [%s]: Drone %d -> Zone %d PARTIAL"
                                 + " (%dL assigned, %dL remain)%n",
                         clock.getFormattedTime(), droneId,
-                        mission.getZoneId(), waterToAssign, remainingWater);
+                        mission.getZoneId(), waterToAssign, remainingWater));
             } else {
                 droneMission = mission;
-                System.out.printf(
-                        "Scheduler [%s]: Drone %d → Zone %d FULL (%dL)%n",
+                log(String.format(
+                        "Scheduler [%s]: Drone %d -> Zone %d FULL (%dL)%n",
                         clock.getFormattedTime(), droneId,
-                        mission.getZoneId(), waterToAssign);
+                        mission.getZoneId(), waterToAssign));
             }
 
             droneActiveMission.put(droneId, droneMission);
@@ -430,8 +447,8 @@ Scheduler implements Runnable {
             return;
         }
 
-        System.out.printf("Scheduler [%s]: Fire at Zone %d (severity=%s)%n",
-                clock.getFormattedTime(), event.getZoneId(), event.getSeverity());
+        log(String.format("Scheduler [%s]: Fire at Zone %d (severity=%s)%n",
+                clock.getFormattedTime(), event.getZoneId(), event.getSeverity()));
         enqueue(event);
         if (currentState == SchedulerState.IDLE) {
             currentState = SchedulerState.DISPATCHING;
@@ -525,9 +542,8 @@ Scheduler implements Runnable {
      * @param waterUsed litres actually dropped
      */
     public synchronized void missionCompleted(int droneId, int zoneId, int waterUsed) {
-        System.out.printf("Scheduler [%s]: Drone %d completed mission"
-                        + " at Zone %d (used %dL)%n",
-                clock.getFormattedTime(), droneId, zoneId, waterUsed);
+        log(String.format("Scheduler [%s]: Drone %d completed Zone %d (used %dL)%n",
+                clock.getFormattedTime(), droneId, zoneId, waterUsed));
 
         // Reduce or remove the committed water entry for this zone
         assignedWaterPerZone.computeIfPresent(zoneId,
@@ -553,7 +569,8 @@ Scheduler implements Runnable {
     }
 
     public synchronized void droneRefilling(int droneId) {
-        System.out.println("Scheduler: Drone " + droneId + " is refilling");
+        log(String.format("Scheduler [%s]: Drone %d returning to base — refilling%n",
+                clock.getFormattedTime(), droneId));
         DroneInfo info = droneRegistry.get(droneId);
         if (info != null) info.state = "REFILLING";
         refillingCount++;
@@ -561,7 +578,8 @@ Scheduler implements Runnable {
     }
 
     public synchronized void droneRefillComplete(int droneId) {
-        System.out.println("Scheduler: Drone " + droneId + " refill complete — IDLE");
+        log(String.format("Scheduler [%s]: Drone %d refill complete — IDLE%n",
+                clock.getFormattedTime(), droneId));
         DroneInfo info = droneRegistry.get(droneId);
         if (info != null) {
             info.state = "IDLE";

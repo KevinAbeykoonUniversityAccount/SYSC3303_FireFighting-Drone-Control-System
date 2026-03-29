@@ -15,10 +15,14 @@ public class SchedulerMain {
         System.out.println("Scheduler running on port " + Scheduler.PORT);
 
 
-        // Launch GUI on the Swing event thread
+        // Launch GUI on the Swing event thread, then wire the log callback
         SwingUtilities.invokeLater(() -> {
             DroneSwarmFrame frame = new DroneSwarmFrame(scheduler);
             frame.setVisible(true);
+            // Route scheduler log messages to the System Log panel (already on EDT)
+            scheduler.setLogCallback(msg ->
+                    SwingUtilities.invokeLater(() ->
+                            frame.getStatusPanel().logMessage(msg)));
         });
     }
 }
