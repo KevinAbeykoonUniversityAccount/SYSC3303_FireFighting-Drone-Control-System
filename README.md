@@ -85,15 +85,14 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   - Since I did most of the Scheduler work for this iteration during the last iteration, there was not much more to do
   - In the last iteration, I created a multiple drone scheduling queue with "logic" as per the project specifications
   - Worked on some Javadoc documentation
-   
-### 3. Rayyan Kashif (101274266)
-  #### Iteration 1
-  - Worked on the implementation of FireEventSubsystem
-  - Worked on UML Class Diagrams
-  #### Iteration 2, 3, & 4
-  Rest in Piece
-  
-### 4. Abdullah Khan (101305235)
+#### Iteration 3
+  - Made some Scheduler changes
+  - Wrote the UDP testing
+#### Iteration 4
+  - Implemented the fault handling system in DroneSubsystem, FireIncidentSubsystem, and Scheduler
+  - I majorily did this by adding to the state based system: adding states for hard fault, entering a soft fault, and recovering from a soft fault
+
+### 3. Abdullah Khan (101305235)
   #### Iteration 1
   - Worked on the implementation of DroneSubsystem
   - Worked on UML Sequence Diagrams
@@ -103,3 +102,11 @@ All unit tests relevant to iteration 2are located in the `test/Iteration 2/` dir
   #### Iteration 3
   - Reworked DroneSubsystem and Scheduler
   - Updated DroneSubsystem state machine diagram
+
+### 4. Rayyan Kashif (101274266)
+  #### Iteration 1
+  - Worked on the implementation of FireEventSubsystem
+  - Worked on UML Class Diagrams
+  #### Iteration 2, 3, & 4
+  Rest in Piece
+  
