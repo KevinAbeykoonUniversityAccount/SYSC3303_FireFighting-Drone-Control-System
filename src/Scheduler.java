@@ -148,14 +148,34 @@ public class Scheduler implements Runnable {
             }
 
             case "receiveFireEvent": {
-                FaultType fault = parts.length > 5 ? FaultType.from(parts[5]) : FaultType.NONE;
+                // receiveFireEvent|zoneId|eventType|severity|secondsFromStart
                 FireEvent event = new FireEvent(
                         Integer.parseInt(parts[1]),
                         parts[2],
                         parts[3],
-                        Integer.parseInt(parts[4]),
-                        fault);           // ← pass fault into FireEvent
+                        Integer.parseInt(parts[4]));
                 receiveFireEvent(event);
+                sendReply("ACK", addr, port);
+                break;
+            }
+
+            case "injectFaultEvent": {
+                // injectFaultEvent|droneId|faultType
+                // Sent by FireIncidentSubsystem when a fault row is reached in the CSV.
+                // We forward INJECT_FAULT directly to the target drone.
+                int       droneId = Integer.parseInt(parts[1]);
+                FaultType fault   = FaultType.from(parts[2]);
+                DroneInfo drone   = droneRegistry.get(droneId);
+
+                if (drone != null) {
+                    log(String.format("Scheduler [%s]: Injecting %s into Drone %d%n",
+                            clock.getFormattedTime(), fault, droneId));
+                    String injectMsg = "INJECT_FAULT|" + droneId + "|" + fault.name();
+                    byte[] data = injectMsg.getBytes();
+                    socket.send(new DatagramPacket(data, data.length, drone.address, drone.port));
+                } else {
+                    System.err.printf("Scheduler: injectFaultEvent — unknown droneId %d%n", droneId);
+                }
                 sendReply("ACK", addr, port);
                 break;
             }
@@ -208,20 +228,19 @@ public class Scheduler implements Runnable {
             }
 
             // Drone returns an interrupted mission for re-queuing
+            // rescheduleFireEvent|zoneId|eventType|severity|waterRemaining|secondsFromStart
             case "rescheduleFireEvent": {
-                FaultType fault = parts.length > 5 ? FaultType.from(parts[5]) : FaultType.NONE;
+                int waterRemaining = Integer.parseInt(parts[4]);
+                int secondsFromStart = Integer.parseInt(parts[5]);
                 FireEvent event = new FireEvent(
                         Integer.parseInt(parts[1]),
                         parts[2],
                         parts[3],
-                        Integer.parseInt(parts[4]),
-                        fault);
-
-                // The drone reports how much water the fire still needs
-                int waterStillNeeded = Integer.parseInt(parts[4]);
-                int originalWater = event.getWaterRemaining();
-                if (originalWater > waterStillNeeded) {
-                    event.waterUsed(originalWater - waterStillNeeded);
+                        secondsFromStart);
+                // Restore the exact water still needed so another drone picks up the right amount
+                int deficit = event.getWaterRemaining() - waterRemaining;
+                if (deficit > 0) {
+                    event.waterUsed(deficit);
                 }
                 rescheduleUnfinishedFireEvent(event);
                 sendReply("ACK", addr, port);
@@ -311,7 +330,6 @@ public class Scheduler implements Runnable {
                     lost.getZoneId(),
                     (k, v) -> (v - lost.getWaterRemaining() <= 0)
                             ? null : v - lost.getWaterRemaining());
-            lost.clearFault();  // prevent fault from re-triggering on the next assigned drone
             rescheduleUnfinishedFireEvent(lost);
         }
     }
@@ -349,11 +367,8 @@ public class Scheduler implements Runnable {
             FireEvent droneMission;
             if (remainingWater > 0) {
                 // Partial assignment — put the remainder back at the front.
-                // The fault belongs only to the first drone assigned; clear it
-                // from the remainder so subsequent drones don't also fault.
                 droneMission = new FireEvent(mission, waterToAssign);
                 mission.waterUsed(waterToAssign);
-                mission.clearFault();
                 rescheduleUnfinishedFireEvent(mission);
                 log(String.format(
                         "Scheduler [%s]: Drone %d -> Zone %d PARTIAL"
@@ -388,8 +403,7 @@ public class Scheduler implements Runnable {
                     + mission.getEventType()          + "|"
                     + mission.getSeverity().name()    + "|"
                     + mission.getWaterRemaining()     + "|"
-                    + mission.getSecondsFromStart()   + "|"
-                    + mission.getFaultType().name();
+                    + mission.getSecondsFromStart();
             byte[] data = msg.getBytes();
             socket.send(new DatagramPacket(
                     data, data.length, drone.address, drone.port));
@@ -610,6 +624,48 @@ public class Scheduler implements Runnable {
     }
 
     // =========== ACCESSORS FOR GUI & TESTING =========
+
+    /**
+     * Single-lock snapshot of all GUI-needed data.
+     * Replaces three separate synchronized calls so the EDT holds the
+     * Scheduler lock for one short window instead of three, reducing
+     * contention with the UDP dispatch loop.
+     */
+    public static class GuiSnapshot {
+        public final Map<Integer, DroneInfo> drones;
+        public final Map<Integer, Integer>   firesPerZone;
+        public final int[]                   fireCounts;   // [high, moderate, low]
+
+        GuiSnapshot(Map<Integer, DroneInfo> drones,
+                    Map<Integer, Integer> firesPerZone,
+                    int[] fireCounts) {
+            this.drones      = drones;
+            this.firesPerZone = firesPerZone;
+            this.fireCounts  = fireCounts;
+        }
+    }
+
+    public synchronized GuiSnapshot getGuiSnapshot() {
+        Map<Integer, DroneInfo> dronesCopy = new HashMap<>(droneRegistry);
+
+        Map<Integer, Integer> fires = new HashMap<>();
+        for (FireEvent e : highFireEventQueue)
+            fires.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (FireEvent e : moderateFireEventQueue)
+            fires.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (FireEvent e : lowFireEventQueue)
+            fires.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (Map.Entry<Integer, Integer> entry : assignedWaterPerZone.entrySet())
+            fires.merge(entry.getKey(), entry.getValue(), Integer::sum);
+
+        int[] counts = {
+                highFireEventQueue.size(),
+                moderateFireEventQueue.size(),
+                lowFireEventQueue.size()
+        };
+
+        return new GuiSnapshot(dronesCopy, fires, counts);
+    }
 
     public synchronized SchedulerState getCurrentState() {
         return currentState;

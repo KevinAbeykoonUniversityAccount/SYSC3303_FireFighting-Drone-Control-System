@@ -4,14 +4,20 @@ import java.io.IOException;
 import java.net.*;
 
 /**
- * Reads an input file and creates fire events. If an event is scheduled at
- * a certain time, it waits until the simulation time reaches the scheduled time
- * before sending the event. Passes the fire events to the scheduler.
+ * Reads the input CSV and dispatches events to the Scheduler over UDP.
  *
- * Iteration 3 changes (marked with // CHANGED):
- *   - Holds a DatagramSocket + scheduler address instead of a Scheduler reference
- *   - scheduler.receiveFireEvent(event) replaced with a direct UDP send
- *   - Waits for the correct time by polling the scheduler's clock over UDP
+ * Input file format (4 columns):
+ *   Time, EventType, ZoneOrDroneID, Severity
+ *
+ * FIRE rows    → receiveFireEvent   sent to Scheduler; ZoneOrDroneID is zone ID.
+ * Fault rows   → injectFaultEvent   sent to Scheduler; ZoneOrDroneID is drone ID.
+ *
+ * Fault event types: DRONE_STUCK, NOZZLE_FAULT
+ *
+ * Example:
+ *   01:00:00,FIRE,1,HIGH
+ *   01:25:00,DRONE_STUCK,1,
+ *   01:45:00,NOZZLE_FAULT,2,
  *
  * @author Rayyan Kashif (101274266)
  * @author Aryan Kumar Singh (101299776)
@@ -23,13 +29,12 @@ public class FireIncidentSubsystem implements Runnable {
     private static final int MAX_RETRIES = 3;
     private static final int CLOCK_SPEED = 60;
 
-    // CHANGED: socket fields instead of Scheduler reference
     private final DatagramSocket socket;
     private final InetAddress    schedulerAddr;
     private final int            schedulerPort;
     private final String         inputFileName;
 
-    public FireIncidentSubsystem(String schedulerHost, int schedulerPort, // CHANGED
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort,
                                  String inputFileName) throws Exception {
         this.schedulerAddr = InetAddress.getByName(schedulerHost);
         this.schedulerPort = schedulerPort;
@@ -60,11 +65,6 @@ public class FireIncidentSubsystem implements Runnable {
         throw new Exception("No response after " + MAX_RETRIES + " attempts");
     }
 
-
-    /**
-     * Asks the Scheduler for its current simulation time in seconds.
-     * This is how FireIncidentSubsystem stays in sync across processes.
-     */
     private long getSchedulerTime() {
         try {
             return Long.parseLong(sendAndReceive("getTime"));
@@ -76,56 +76,68 @@ public class FireIncidentSubsystem implements Runnable {
 
     @Override
     public void run() {
-        System.out.println("Starting FireIncidentSubsystem - Reading: " + inputFileName + "...\n\n");
+        System.out.println("Starting FireIncidentSubsystem - Reading: " + inputFileName + "...\n");
 
         try (BufferedReader br = new BufferedReader(new FileReader(inputFileName))) {
-            String line;
+            String  line;
             boolean clockStarted = false;
             boolean isFirstLine  = true;
 
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty() || line.startsWith("#")) continue;
-                if (isFirstLine) { isFirstLine = false; continue; }
+                if (isFirstLine) { isFirstLine = false; continue; }  // skip header
 
                 try {
-                    String[] parts = line.split("[,\\s]+");
+                    // Split on comma; allow optional whitespace around each token
+                    String[] parts = line.split(",", -1);
+                    for (int i = 0; i < parts.length; i++) parts[i] = parts[i].trim();
 
-                    String   timeStr   = parts[0].trim();
-                    String[] timeParts = timeStr.split(":");
+                    // Column 0: Time
+                    String[] timeParts = parts[0].split(":");
                     int hours   = Integer.parseInt(timeParts[0]);
                     int minutes = Integer.parseInt(timeParts[1]);
                     int seconds = Integer.parseInt(timeParts[2]);
                     int eventTimeSeconds = hours * 3600 + minutes * 60 + seconds;
 
-
-                    // Start the Scheduler's clock at the first event's timestamp
-                    // so no real time is wasted between program startups
+                    // Start the Scheduler's clock on the first event
                     if (!clockStarted) {
                         sendAndReceive("startClock|" + eventTimeSeconds + "|" + CLOCK_SPEED);
                         clockStarted = true;
                     }
 
-                    // Wait until the Scheduler's clock reaches this event's time
+                    // Wait until simulation time reaches this event
                     while (getSchedulerTime() < eventTimeSeconds) {
                         Thread.sleep(200);
                     }
 
-                    int    zoneId    = Integer.parseInt(parts[1].trim());
-                    String eventType = parts[2].trim();
-                    String severity  = parts[3].trim();
-                    FaultType fault  = parts.length > 4 ? FaultType.from(parts[4].trim()) : FaultType.NONE;
+                    // Column 1: EventType  (FIRE | DRONE_STUCK | NOZZLE_FAULT)
+                    String eventType = parts[1].toUpperCase();
 
-                    FireEvent event = new FireEvent(zoneId, eventType, severity, eventTimeSeconds, fault);
+                    if (eventType.equals("FIRE")) {
+                        // Column 2: Zone ID   Column 3: Severity
+                        int    zoneId   = Integer.parseInt(parts[2]);
+                        String severity = parts[3];
 
-                    System.out.printf("FireIncidentSubsystem: Sending Event: %s%n", event);
+                        FireEvent event = new FireEvent(zoneId, "FIRE", severity, eventTimeSeconds);
+                        System.out.printf("FireIncidentSubsystem: Sending Fire Event: %s%n", event);
 
-                    // CHANGED: was scheduler.receiveFireEvent(event)
-                    sendAndReceive("receiveFireEvent|"
-                            + event.getZoneId()            + "|"
-                            + event.getEventType()          + "|"
-                            + event.getSeverity().name()    + "|"
-                            + event.getSecondsFromStart()   + "|"
-                            + event.getFaultType().name());
+                        sendAndReceive("receiveFireEvent|"
+                                + event.getZoneId()          + "|"
+                                + event.getEventType()        + "|"
+                                + event.getSeverity().name()  + "|"
+                                + event.getSecondsFromStart());
+
+                    } else {
+                        // Fault event — Column 2 is the target drone ID
+                        int       droneId   = Integer.parseInt(parts[2]);
+                        FaultType faultType = FaultType.from(eventType);
+
+                        System.out.printf(
+                                "FireIncidentSubsystem: Sending Fault Event: %s -> Drone %d%n",
+                                faultType, droneId);
+
+                        sendAndReceive("injectFaultEvent|" + droneId + "|" + faultType.name());
+                    }
 
                 } catch (Exception e) {
                     System.err.println("FireIncidentSubsystem Error Parsing Line: " + line);

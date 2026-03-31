@@ -16,7 +16,8 @@ public class DroneSwarmFrame extends JFrame {
     private DroneStatusPanel droneStatusPanel;
 
     private Scheduler model;
-    private Timer refreshTimer;
+    private Timer mapTimer;    // fast  — smooth drone movement on the map
+    private Timer statusTimer; // slow  — drone table + fire count label
 
     public DroneSwarmFrame(Scheduler model) {
         setTitle("Firefighting Drone Swarm - Control Center");
@@ -47,22 +48,19 @@ public class DroneSwarmFrame extends JFrame {
         setSize(1600, 1050);
         setLocationRelativeTo(null); // Center on screen
 
-        // Set up refresh timer for GUI elements (every 500 ms)
-        refreshTimer = new Timer(500, e -> refreshDisplay());
-        refreshTimer.start();
+        // Fast timer: only redraws the map (one synchronized snapshot call)
+        mapTimer = new Timer(100, e -> refreshMap());
+        mapTimer.start();
+
+        // Slow timer: updates the drone status table and fire counts
+        statusTimer = new Timer(500, e -> droneStatusPanel.refreshData());
+        statusTimer.start();
     }
 
-
-    private void refreshDisplay() {
+    private void refreshMap() {
         if (model != null) {
-            // Update drone positions and fire severities on map
-            mapPanel.updateDronesAndFires(
-                    model.getDroneRegistry(),
-                    model.getActiveFiresPerZone()
-            );
-
-            // Update drone status table and fire counts
-            droneStatusPanel.refreshData();
+            Scheduler.GuiSnapshot snap = model.getGuiSnapshot();
+            mapPanel.updateDronesAndFires(snap.drones, snap.firesPerZone);
         }
     }
 

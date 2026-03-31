@@ -49,7 +49,8 @@ public class DroneSubsystem extends Thread implements DroneCallback {
 
     // ==== UDP helpers ====
 
-    /** Fire-and-forget send. */
+    /** Fire-and-forget 
+     * . */
     private void sendOnly(String message) {
         try {
             byte[] data = message.getBytes();
@@ -70,6 +71,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
             byte[] data = message.getBytes();
             DatagramPacket sendPkt = new DatagramPacket(data, data.length,
                     schedulerAddr, schedulerPort);
+                    
             byte[] buf = new byte[BUFFER_SIZE];
             DatagramPacket recvPkt = new DatagramPacket(buf, buf.length);
 
@@ -201,25 +203,22 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         switch (parts[0]) {
 
             case "ASSIGN_MISSION": {
-                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity
-                // [5]=water   [6]=seconds [7]=faultType
+                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity [5]=water [6]=seconds
                 int droneId = Integer.parseInt(parts[1]);
                 DroneMachine drone = drones.get(droneId);
                 if (drone == null) {
                     System.err.println("DroneSubsystem: unknown droneId " + droneId);
                     return;
                 }
-                FireEvent base = new FireEvent(
+                FireEvent base    = new FireEvent(
                         Integer.parseInt(parts[2]),
                         parts[3],
                         parts[4],
-                        Integer.parseInt(parts[6]),
-                        FaultType.NONE);              // ← satisfies the constructor, fault travels separately
+                        Integer.parseInt(parts[6]));
                 FireEvent mission = new FireEvent(base, Integer.parseInt(parts[5]));
-                FaultType fault   = parts.length > 7 ? FaultType.from(parts[7]) : FaultType.NONE;
-                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d [fault=%s]%n",
-                        droneId, mission.getZoneId(), fault);
-                drone.receiveMissionPush(mission, fault);
+                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d%n",
+                        droneId, mission.getZoneId());
+                drone.receiveMissionPush(mission);
                 break;
             }
 
