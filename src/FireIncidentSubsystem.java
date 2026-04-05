@@ -28,6 +28,7 @@ public class FireIncidentSubsystem implements Runnable {
     private final InetAddress    schedulerAddr;
     private final int            schedulerPort;
     private final String         inputFileName;
+    private InetAddress loggerAddress;
 
     public FireIncidentSubsystem(String schedulerHost, int schedulerPort, // CHANGED
                                  String inputFileName) throws Exception {
@@ -36,6 +37,17 @@ public class FireIncidentSubsystem implements Runnable {
         this.inputFileName = inputFileName;
         this.socket        = new DatagramSocket();
         this.socket.setSoTimeout(TIMEOUT_MS);
+        this.loggerAddress = InetAddress.getLocalHost();
+    }
+
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort, // CHANGED
+                                 String inputFileName, String loggerHost) throws Exception {
+        this.schedulerAddr = InetAddress.getByName(schedulerHost);
+        this.schedulerPort = schedulerPort;
+        this.inputFileName = inputFileName;
+        this.socket        = new DatagramSocket();
+        this.socket.setSoTimeout(TIMEOUT_MS);
+        this.loggerAddress = InetAddress.getByName(loggerHost);
     }
 
     // ==== UDP helpers ====
@@ -74,8 +86,18 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
 
+    public void log(String msg) {
+        byte[] event = msg.getBytes();
+        try {
+            socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public void run() {
+        log("FireSubsystem Started");
         System.out.println("Starting FireIncidentSubsystem - Reading: " + inputFileName + "...\n\n");
 
         try (BufferedReader br = new BufferedReader(new FileReader(inputFileName))) {
