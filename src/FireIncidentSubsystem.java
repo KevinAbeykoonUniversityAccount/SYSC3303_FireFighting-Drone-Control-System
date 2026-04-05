@@ -36,12 +36,13 @@ public class FireIncidentSubsystem implements Runnable {
     private final String         inputFileName;
     private InetAddress loggerAddress;
 
-    public FireIncidentSubsystem(String schedulerHost, int schedulerPort) throws Exception {
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort, String inputFileName) throws Exception {
         this.schedulerAddr = InetAddress.getByName(schedulerHost);
         this.schedulerPort = schedulerPort;
         this.inputFileName = inputFileName;
-        this.socket        = new DatagramSocket();
-        this.socket.setSoTimeout(TIMEOUT_MS);
+        this.sendSocket = new DatagramSocket();
+        this.sendSocket.setSoTimeout(TIMEOUT_MS);
+        this.listenSocket  = new DatagramSocket(PORT);
         this.loggerAddress = InetAddress.getLocalHost();
     }
 
@@ -50,8 +51,8 @@ public class FireIncidentSubsystem implements Runnable {
         this.schedulerAddr = InetAddress.getByName(schedulerHost);
         this.schedulerPort = schedulerPort;
         this.inputFileName = inputFileName;
-        this.socket        = new DatagramSocket();
-        this.socket.setSoTimeout(TIMEOUT_MS);
+        this.sendSocket = new DatagramSocket();
+        this.sendSocket.setSoTimeout(TIMEOUT_MS);
         this.listenSocket  = new DatagramSocket(PORT);
         this.loggerAddress = InetAddress.getByName(loggerHost);
     }
@@ -90,7 +91,7 @@ public class FireIncidentSubsystem implements Runnable {
   public void log(String msg) {
         byte[] event = msg.getBytes();
         try {
-            socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
+            sendSocket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
         } catch (IOException e) {
             e.printStackTrace();
         }
