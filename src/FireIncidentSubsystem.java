@@ -33,13 +33,27 @@ public class FireIncidentSubsystem implements Runnable {
     private final DatagramSocket listenSocket; // bound to PORT, receives commands
     private final InetAddress    schedulerAddr;
     private final int            schedulerPort;
+    private final String         inputFileName;
+    private InetAddress loggerAddress;
 
     public FireIncidentSubsystem(String schedulerHost, int schedulerPort) throws Exception {
         this.schedulerAddr = InetAddress.getByName(schedulerHost);
         this.schedulerPort = schedulerPort;
-        this.sendSocket    = new DatagramSocket();
-        this.sendSocket.setSoTimeout(TIMEOUT_MS);
+        this.inputFileName = inputFileName;
+        this.socket        = new DatagramSocket();
+        this.socket.setSoTimeout(TIMEOUT_MS);
+        this.loggerAddress = InetAddress.getLocalHost();
+    }
+
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort, // CHANGED
+                                 String inputFileName, String loggerHost) throws Exception {
+        this.schedulerAddr = InetAddress.getByName(schedulerHost);
+        this.schedulerPort = schedulerPort;
+        this.inputFileName = inputFileName;
+        this.socket        = new DatagramSocket();
+        this.socket.setSoTimeout(TIMEOUT_MS);
         this.listenSocket  = new DatagramSocket(PORT);
+        this.loggerAddress = InetAddress.getByName(loggerHost);
     }
 
     // ==== UDP helpers (talk to Scheduler) ====
@@ -73,10 +87,20 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
 
+  public void log(String msg) {
+        byte[] event = msg.getBytes();
+        try {
+            socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+      
     // ==== Main loop: wait for loadFile commands ====
 
     @Override
     public void run() {
+        log("FireSubsystem Started");
         System.out.println("FireIncidentSubsystem: Listening on port " + PORT
                 + " for loadFile commands...");
         byte[] buf = new byte[BUFFER_SIZE];

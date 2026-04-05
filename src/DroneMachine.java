@@ -434,10 +434,15 @@ public class DroneMachine extends Thread {
         }
     }
 
+    public void log(String msg) {
+        callback.log(msg);
+    }
+
 
     @Override
     public void run() {
         System.out.printf("Drone %d: Starting%n", droneId);
+        log("Drone " + droneId + ": Started");
 
         while (droneState != DroneState.DECOMMISSIONED) {
             // Wait for DroneSubsystem to push a mission via receiveMissionPush().

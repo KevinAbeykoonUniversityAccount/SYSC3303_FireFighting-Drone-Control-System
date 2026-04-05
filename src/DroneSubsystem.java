@@ -1,3 +1,4 @@
+import java.io.IOException;
 import java.net.*;
 import java.util.*;
 
@@ -18,6 +19,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
     private final DatagramSocket socket;
     private final InetAddress    schedulerAddr;
     private final int            schedulerPort;
+    private InetAddress loggerAddress;
 
 
     /** droneId → DroneMachine instance. */
@@ -39,6 +41,23 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         this.schedulerPort = schedulerPort;
         this.socket        = new DatagramSocket(0);  // OS assigns a free port
         this.socket.setSoTimeout(200);
+        this.loggerAddress = InetAddress.getLocalHost();
+
+        // Create each drone — pass 'this' as the callback so DroneMachine
+        // can report events without touching the socket directly
+        for (int id : ids) {
+            drones.put(id, new DroneMachine(id, this));
+        }
+    }
+
+    public DroneSubsystem(List<Integer> ids,
+                          String schedulerHost,
+                          int schedulerPort, String loggerHost) throws Exception {
+        this.schedulerAddr = InetAddress.getByName(schedulerHost);
+        this.schedulerPort = schedulerPort;
+        this.socket        = new DatagramSocket(0);  // OS assigns a free port
+        this.socket.setSoTimeout(200);
+        this.loggerAddress = InetAddress.getByName(loggerHost);
 
         // Create each drone — pass 'this' as the callback so DroneMachine
         // can report events without touching the socket directly
@@ -263,9 +282,19 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         }
     }
 
+    public void log(String msg) {
+        byte[] event = msg.getBytes();
+        try {
+            socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     @Override
     public void run() {
         System.out.println("DroneSubsystem: Starting");
+        log("Drone Subsystem Started");
 
         // Start each drone's state machine on its own thread
         for (DroneMachine drone : drones.values()) {
