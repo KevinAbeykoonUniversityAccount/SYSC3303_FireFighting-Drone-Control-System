@@ -11,13 +11,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author Aryan Kumar Singh (101299776)
  */
 public class MapPanel extends JPanel {
-    private java.util.List<Zone> zones = new ArrayList<>();
+    private List<ZoneRect> zones = new ArrayList<>();
     private Map<Integer, DroneInfo> drones = new HashMap<>();
     private Map<Integer, Integer> fireSeverityMap = new HashMap<>(); // zone -> total water needed
 
-    // Grid properties: 30x30 cells, each representing 100m x 100m
-    private final int GRID_CELLS = 30;
+    // Grid properties: cells each representing 100m x 100m; expands with loaded zones
     private final int CELL_SIZE_PX = 25;
+    private final int GRID_CELLS = 30; // default / minimum
+    private int gridCols = GRID_CELLS;
+    private int gridRows = GRID_CELLS;
 
     // Track fire cells: zone ID -> list of cell coordinates that are on fire
     private Map<Integer, List<Point>> fireCells = new ConcurrentHashMap<>();
@@ -30,11 +32,37 @@ public class MapPanel extends JPanel {
         setBackground(Color.LIGHT_GRAY);
         setBorder(BorderFactory.createLineBorder(Color.BLACK, 2));
 
-        // Create 4 zones (in grid coordinates)
-        zones.add(new Zone(1, 0, 0, 14, 14));      // Top-left
-        zones.add(new Zone(2, 15, 0, 29, 14));     // Top-right
-        zones.add(new Zone(3, 0, 15, 14, 29));     // Bottom-left
-        zones.add(new Zone(4, 15, 15, 29, 29));    // Bottom-right
+        // Default 4 zones (x1=left col, y1=top row, x2=right col, y2=bottom row)
+        zones.add(new ZoneRect(1, 0, 0, 14, 14));
+        zones.add(new ZoneRect(2, 15, 0, 29, 14));
+        zones.add(new ZoneRect(3, 0, 15, 14, 29));
+        zones.add(new ZoneRect(4, 15, 15, 29, 29));
+    }
+
+    /**
+     * Replace the displayed zones with those loaded from a file.
+     * Accepts the top-level Zone type (xMin/xMax/yMin/yMax) and converts
+     * to the inner rendering format. Also resizes the grid to fit all zones.
+     */
+    public void setZones(Map<Integer, Zone> schedulerZones) {
+        zones.clear();
+        fireCells.clear();
+        cellWaterNeeded.clear();
+        extinguishingCells.clear();
+        fireSeverityMap.clear();
+
+        int maxCol = GRID_CELLS - 1;
+        int maxRow = GRID_CELLS - 1;
+        for (Zone sz : schedulerZones.values()) {
+            zones.add(new ZoneRect(sz.getId(), sz.getXMin(), sz.getYMin(), sz.getXMax(), sz.getYMax()));
+            maxCol = Math.max(maxCol, sz.getXMax());
+            maxRow = Math.max(maxRow, sz.getYMax());
+        }
+        gridCols = maxCol + 1;
+        gridRows = maxRow + 1;
+        invalidate();
+        revalidate();
+        repaint();
     }
 
     /**
@@ -44,9 +72,8 @@ public class MapPanel extends JPanel {
                                      Map<Integer, Integer> zoneWater) {
         this.drones = droneMap;
         this.fireSeverityMap = zoneWater;
-        // Convert zone water to fire cells
         updateFireCells(zoneWater);
-        repaint(); // Trigger redraw
+        repaint();
     }
 
     /**
@@ -61,17 +88,12 @@ public class MapPanel extends JPanel {
             int totalWater = entry.getValue();
 
             if (totalWater > 0) {
-                Zone zone = getZoneById(zoneId);
+                ZoneRect zone = getZoneById(zoneId);
                 if (zone != null) {
-                    // Calculate number of fire cells based on water needed
-                    // Each cell starts with 5L of water requirement
                     int numFireCells = (int) Math.ceil(totalWater / 5.0);
-
-                    // Generate fire cells at the CENTER of the zone, not random
                     List<Point> cells = generateCenterFireCells(zone, numFireCells);
                     fireCells.put(zoneId, cells);
 
-                    // Distribute water among cells
                     int waterPerCell = totalWater / numFireCells;
                     int remainder = totalWater % numFireCells;
 
@@ -88,20 +110,17 @@ public class MapPanel extends JPanel {
     /**
      * Generate fire cells clustered at the center of the zone
      */
-    private List<Point> generateCenterFireCells(Zone zone, int count) {
+    private List<Point> generateCenterFireCells(ZoneRect zone, int count) {
         List<Point> cells = new ArrayList<>();
 
-        // Calculate center of zone
         int centerX = (zone.x1 + zone.x2) / 2;
         int centerY = (zone.y1 + zone.y2) / 2;
 
-        // Generate cells in a 3x3 grid around the center
         int[] offsets = {-1, 0, 1};
 
         for (int i = 0; i < count && i < 9; i++) {
             int x = centerX + offsets[i % 3];
             int y = centerY + offsets[i / 3];
-            // Ensure within zone bounds
             x = Math.max(zone.x1, Math.min(zone.x2, x));
             y = Math.max(zone.y1, Math.min(zone.y2, y));
             cells.add(new Point(x, y));
@@ -126,7 +145,6 @@ public class MapPanel extends JPanel {
         extinguishingCells.remove(cell);
         cellWaterNeeded.remove(cell);
 
-        // Remove from fireCells map
         for (List<Point> cells : fireCells.values()) {
             cells.remove(cell);
         }
@@ -139,9 +157,9 @@ public class MapPanel extends JPanel {
     private Color getZoneBackgroundColor(int zoneId) {
         Integer waterNeeded = fireSeverityMap.get(zoneId);
         if (waterNeeded == null || waterNeeded == 0) {
-            return new Color(200, 255, 200, 50); // Light green with low opacity for safe zones
+            return new Color(200, 255, 200, 50);
         } else {
-            return new Color(255, 200, 200, 30); // Very light red tint for zones with fire
+            return new Color(255, 200, 200, 30);
         }
     }
 
@@ -150,50 +168,37 @@ public class MapPanel extends JPanel {
         super.paintComponent(g);
         Graphics2D g2d = (Graphics2D) g;
 
-        // Draw background grid
         drawGrid(g2d);
-
-        // Draw zone background colors
         drawZoneBackgrounds(g2d);
-
-        // Draw fire cells
         drawFireCells(g2d);
-
-        // Draw zone borders
         drawZoneBorders(g2d);
-
-        // Draw drones on top
         drawDrones(g2d);
-
-        // Draw title and legend
         drawTitleAndLegend(g2d);
     }
 
     private void drawGrid(Graphics2D g2d) {
         g2d.setColor(Color.GRAY);
-        for (int x = 0; x <= GRID_CELLS * CELL_SIZE_PX; x += CELL_SIZE_PX) {
-            g2d.drawLine(x, 0, x, GRID_CELLS * CELL_SIZE_PX);
+        for (int x = 0; x <= gridCols * CELL_SIZE_PX; x += CELL_SIZE_PX) {
+            g2d.drawLine(x, 0, x, gridRows * CELL_SIZE_PX);
         }
-        for (int y = 0; y <= GRID_CELLS * CELL_SIZE_PX; y += CELL_SIZE_PX) {
-            g2d.drawLine(0, y, GRID_CELLS * CELL_SIZE_PX, y);
+        for (int y = 0; y <= gridRows * CELL_SIZE_PX; y += CELL_SIZE_PX) {
+            g2d.drawLine(0, y, gridCols * CELL_SIZE_PX, y);
         }
     }
 
     private void drawZoneBackgrounds(Graphics2D g2d) {
-        for (Zone zone : zones) {
+        for (ZoneRect zone : zones) {
             int x1 = zone.x1 * CELL_SIZE_PX;
             int y1 = zone.y1 * CELL_SIZE_PX;
             int width = (zone.x2 - zone.x1 + 1) * CELL_SIZE_PX;
             int height = (zone.y2 - zone.y1 + 1) * CELL_SIZE_PX;
 
-            // Fill zone with background color
             g2d.setColor(getZoneBackgroundColor(zone.id));
             g2d.fillRect(x1, y1, width, height);
         }
     }
 
     private void drawFireCells(Graphics2D g2d) {
-        // Draw all fire cells
         for (Map.Entry<Point, Integer> entry : cellWaterNeeded.entrySet()) {
             Point cell = entry.getKey();
             int waterNeeded = entry.getValue();
@@ -201,30 +206,24 @@ public class MapPanel extends JPanel {
             int x = cell.x * CELL_SIZE_PX;
             int y = cell.y * CELL_SIZE_PX;
 
-            // Check if this cell is being extinguished
             if (extinguishingCells.contains(cell)) {
-                // Being extinguished - yellow
-                g2d.setColor(new Color(255, 255, 0, 200)); // Bright yellow
+                g2d.setColor(new Color(255, 255, 0, 200));
             } else {
-                // On fire - color based on water needed
                 if (waterNeeded >= 4) {
-                    g2d.setColor(new Color(255, 0, 0, 220)); // Red for high
+                    g2d.setColor(new Color(255, 0, 0, 220));
                 } else if (waterNeeded >= 2) {
-                    g2d.setColor(new Color(255, 100, 0, 220)); // Orange for medium
+                    g2d.setColor(new Color(255, 100, 0, 220));
                 } else {
-                    g2d.setColor(new Color(255, 200, 0, 220)); // Yellow-orange for low
+                    g2d.setColor(new Color(255, 200, 0, 220));
                 }
             }
 
-            // Fill the cell with a slight margin to show grid
             g2d.fillRect(x + 2, y + 2, CELL_SIZE_PX - 4, CELL_SIZE_PX - 4);
 
-            // Draw flame icon
             g2d.setColor(Color.WHITE);
             g2d.setFont(new Font("Arial", Font.BOLD, 12));
             g2d.drawString("🔥", x + 6, y + 18);
 
-            // Draw water amount
             g2d.setColor(Color.BLACK);
             g2d.setFont(new Font("Arial", Font.BOLD, 8));
             g2d.drawString(waterNeeded + "L", x + 8, y + 28);
@@ -235,85 +234,74 @@ public class MapPanel extends JPanel {
         g2d.setColor(Color.BLACK);
         g2d.setStroke(new BasicStroke(2));
 
-        for (Zone zone : zones) {
+        for (ZoneRect zone : zones) {
             int x1 = zone.x1 * CELL_SIZE_PX;
             int y1 = zone.y1 * CELL_SIZE_PX;
             int width = (zone.x2 - zone.x1 + 1) * CELL_SIZE_PX;
             int height = (zone.y2 - zone.y1 + 1) * CELL_SIZE_PX;
 
-            // Draw zone border
             g2d.drawRect(x1, y1, width, height);
 
-            // Draw zone label
             g2d.setFont(new Font("Arial", Font.BOLD, 12));
             g2d.setColor(Color.BLACK);
-            String label = "Zone " + zone.id;
-            g2d.drawString(label, x1 + 5, y1 + 15);
+            g2d.drawString("Zone " + zone.id, x1 + 5, y1 + 15);
         }
     }
 
     private void drawDrones(Graphics2D g2d) {
         if (drones != null && !drones.isEmpty()) {
-            for (DroneInfo drone : drones.values()) {  // CHANGED: DroneSubsystem → DroneInfo
+            for (DroneInfo drone : drones.values()) {
                 if (drone != null) {
-                    int x = drone.x * CELL_SIZE_PX + CELL_SIZE_PX/2;  // CHANGED: getX() → drone.x
-                    int y = drone.y * CELL_SIZE_PX + CELL_SIZE_PX/2;  // CHANGED: getY() → drone.y
+                    int x = drone.x * CELL_SIZE_PX + CELL_SIZE_PX / 2;
+                    int y = drone.y * CELL_SIZE_PX + CELL_SIZE_PX / 2;
 
-                    // Draw drone shadow
                     g2d.setColor(new Color(0, 0, 0, 50));
                     g2d.fillOval(x - 8, y - 8, 20, 20);
 
-                    // Pick color by state
                     Color droneColor;
                     switch (drone.state) {
-                        case "ONROUTE":        droneColor = Color.BLUE;  break;
-                        case "EXTINGUISHING":  droneColor = Color.GREEN; break;
+                        case "ONROUTE":        droneColor = Color.BLUE;              break;
+                        case "EXTINGUISHING":  droneColor = new Color(148, 0, 211);  break; // purple
                         case "REFILLING":      droneColor = Color.CYAN;  break;
-                        case "FAULTED":        droneColor = new Color(255, 191, 0); break; // amber — soft fault
-                        case "DECOMMISSIONED": droneColor = new Color(200, 50, 50); break; // red   — hard fault
-                        default:               droneColor = Color.BLACK;  // IDLE
+                        case "FAULTED":        droneColor = new Color(255, 191, 0); break;
+                        case "DECOMMISSIONED": droneColor = new Color(200, 50, 50); break;
+                        default:               droneColor = Color.BLACK;
                     }
 
-                    // Draw drone circle
                     g2d.setColor(droneColor);
                     g2d.fillOval(x - 8, y - 8, 16, 16);
 
-
-                    // Draw an X over decommissioned drones so they are visually distinct
-                    // and clearly not active — they stay at their last known position
                     if ("DECOMMISSIONED".equals(drone.state)) {
                         g2d.setColor(Color.WHITE);
                         g2d.setStroke(new BasicStroke(2));
                         g2d.drawLine(x - 5, y - 5, x + 5, y + 5);
                         g2d.drawLine(x + 5, y - 5, x - 5, y + 5);
-                        g2d.setStroke(new BasicStroke(1)); // reset
+                        g2d.setStroke(new BasicStroke(1));
                     }
 
-                    // Draw drone ID
                     g2d.setColor(Color.WHITE);
                     g2d.setFont(new Font("Arial", Font.BOLD, 10));
-                    g2d.drawString(String.valueOf(drone.droneId), x - 4, y + 4); // CHANGED: getDroneId() → drone.droneId
+                    g2d.drawString(String.valueOf(drone.droneId), x - 4, y + 4);
                 }
             }
         }
     }
 
     private void drawTitleAndLegend(Graphics2D g2d) {
+        int gridH = gridRows * CELL_SIZE_PX;
         g2d.setColor(Color.BLACK);
         g2d.setFont(new Font("Arial", Font.BOLD, 14));
-        g2d.drawString("3km x 3km Area (30x30 Grid)", 10, GRID_CELLS * CELL_SIZE_PX + 20);
+        g2d.drawString(gridCols + "x" + gridRows + " Grid (" + (gridCols * 100) + "m x " + (gridRows * 100) + "m)", 10, gridH + 20);
         g2d.setFont(new Font("Arial", Font.PLAIN, 10));
-        g2d.drawString("Each cell: 100m x 100m", 10, GRID_CELLS * CELL_SIZE_PX + 35);
+        g2d.drawString("Each cell: 100m x 100m", 10, gridH + 35);
 
-        // Draw legend below the grid
-        drawLegend(g2d);
+        drawLegend(g2d, gridH);
     }
 
-    private void drawLegend(Graphics2D g2d) {
+    private void drawLegend(Graphics2D g2d, int gridH) {
         int legendX = 10;
-        int legendY = GRID_CELLS * CELL_SIZE_PX + 50; // below the grid
+        int legendY = gridH + 50;
 
-        // Semi-transparent background
         g2d.setColor(new Color(255, 255, 255, 220));
         g2d.fillRect(legendX, legendY, 200, 160);
         g2d.setColor(Color.BLACK);
@@ -324,49 +312,43 @@ public class MapPanel extends JPanel {
 
         g2d.setFont(new Font("Arial", Font.PLAIN, 10));
 
-        // IDLE
         g2d.setColor(Color.BLACK);
         g2d.fillOval(legendX + 12, legendY + 30, 12, 12);
         g2d.setColor(Color.BLACK);
         g2d.drawString("IDLE", legendX + 30, legendY + 40);
 
-        // EN ROUTE
         g2d.setColor(Color.BLUE);
         g2d.fillOval(legendX + 12, legendY + 50, 12, 12);
         g2d.setColor(Color.BLACK);
         g2d.drawString("EN ROUTE", legendX + 30, legendY + 60);
 
-        // EXTINGUISHING
-        g2d.setColor(Color.GREEN);
+        g2d.setColor(new Color(148, 0, 211));
         g2d.fillOval(legendX + 12, legendY + 70, 12, 12);
         g2d.setColor(Color.BLACK);
         g2d.drawString("EXTINGUISHING", legendX + 30, legendY + 80);
 
-        // REFILLING
         g2d.setColor(Color.CYAN);
         g2d.fillOval(legendX + 12, legendY + 90, 12, 12);
         g2d.setColor(Color.BLACK);
         g2d.drawString("REFILLING", legendX + 30, legendY + 100);
 
-        // FAULTED (soft)
         g2d.setColor(new Color(255, 191, 0));
         g2d.fillOval(legendX + 12, legendY + 110, 12, 12);
         g2d.setColor(Color.BLACK);
         g2d.drawString("SOFT FAULT", legendX + 30, legendY + 120);
 
-        // DECOMMISSIONED (hard)
         g2d.setColor(new Color(200, 50, 50));
         g2d.fillOval(legendX + 12, legendY + 130, 12, 12);
         g2d.setColor(Color.BLACK);
         g2d.drawString("HARD FAULT (offline)", legendX + 30, legendY + 140);
     }
 
-    // Zone class
-    class Zone {
+    // Inner rendering rectangle for a zone
+    class ZoneRect {
         int id;
-        int x1, y1, x2, y2; // Grid coordinates (0-29)
+        int x1, y1, x2, y2; // Grid coordinates (col/row, 0-indexed)
 
-        Zone(int id, int x1, int y1, int x2, int y2) {
+        ZoneRect(int id, int x1, int y1, int x2, int y2) {
             this.id = id;
             this.x1 = x1;
             this.y1 = y1;
@@ -375,11 +357,8 @@ public class MapPanel extends JPanel {
         }
     }
 
-    /**
-     * Get zone by ID
-     */
-    private Zone getZoneById(int id) {
-        for (Zone zone : zones) {
+    private ZoneRect getZoneById(int id) {
+        for (ZoneRect zone : zones) {
             if (zone.id == id) return zone;
         }
         return null;
@@ -387,7 +366,7 @@ public class MapPanel extends JPanel {
 
     @Override
     public Dimension getPreferredSize() {
-        return new Dimension(GRID_CELLS * CELL_SIZE_PX + 40,
-                GRID_CELLS * CELL_SIZE_PX + 180); // extra space for legend
+        return new Dimension(gridCols * CELL_SIZE_PX + 40,
+                gridRows * CELL_SIZE_PX + 180);
     }
 }

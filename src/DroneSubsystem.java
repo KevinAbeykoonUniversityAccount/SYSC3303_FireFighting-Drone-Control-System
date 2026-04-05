@@ -68,7 +68,8 @@ public class DroneSubsystem extends Thread implements DroneCallback {
 
     // ==== UDP helpers ====
 
-    /** Fire-and-forget send. */
+    /** Fire-and-forget 
+     * . */
     private void sendOnly(String message) {
         try {
             byte[] data = message.getBytes();
@@ -89,6 +90,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
             byte[] data = message.getBytes();
             DatagramPacket sendPkt = new DatagramPacket(data, data.length,
                     schedulerAddr, schedulerPort);
+                    
             byte[] buf = new byte[BUFFER_SIZE];
             DatagramPacket recvPkt = new DatagramPacket(buf, buf.length);
 
@@ -113,6 +115,11 @@ public class DroneSubsystem extends Thread implements DroneCallback {
     @Override
     public void onLocationUpdate(int droneId, int x, int y, String state) {
         sendOnly("locationUpdate|" + droneId + "|" + x + "|" + y + "|" + state);
+    }
+
+    @Override
+    public void onBatteryUpdate(int droneId, int battery) {
+        sendOnly("batteryUpdate|" + droneId + "|" + battery);
     }
 
     @Override
@@ -188,7 +195,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
      * All drones share this subsystem's port — the Scheduler includes the
      * droneId in every ASSIGN_MISSION push so we can route it here.
      *
-     * Message: registerDrone|droneId|x|y|water|listenPort
+     * Message: registerDrone|droneId|x|y|water|listenPort|battery
      */
     private void registerAllDrones() {
         int listenPort = socket.getLocalPort();
@@ -196,7 +203,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
             try {
                 sendAndReceive("registerDrone|" + drone.getDroneId() + "|"
                         + drone.getX() + "|" + drone.getY() + "|"
-                        + drone.getWaterRemaining() + "|" + listenPort);
+                        + drone.getWaterRemaining() + "|" + listenPort + "|" + drone.getBatteryRemaining());
                 System.out.printf("DroneSubsystem: Drone %d registered (port %d)%n",
                         drone.getDroneId(), listenPort);
             } catch (Exception e) {
@@ -220,25 +227,25 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         switch (parts[0]) {
 
             case "ASSIGN_MISSION": {
-                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity
-                // [5]=water   [6]=seconds [7]=faultType
+                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity [5]=water [6]=seconds [7]=targetX [8]=targetY
                 int droneId = Integer.parseInt(parts[1]);
                 DroneMachine drone = drones.get(droneId);
                 if (drone == null) {
                     System.err.println("DroneSubsystem: unknown droneId " + droneId);
                     return;
                 }
-                FireEvent base = new FireEvent(
+                FireEvent base    = new FireEvent(
                         Integer.parseInt(parts[2]),
                         parts[3],
                         parts[4],
-                        Integer.parseInt(parts[6]),
-                        FaultType.NONE);              // ← satisfies the constructor, fault travels separately
+                        Integer.parseInt(parts[6]));
                 FireEvent mission = new FireEvent(base, Integer.parseInt(parts[5]));
-                FaultType fault   = parts.length > 7 ? FaultType.from(parts[7]) : FaultType.NONE;
-                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d [fault=%s]%n",
-                        droneId, mission.getZoneId(), fault);
-                drone.receiveMissionPush(mission, fault);
+                int targetX = Integer.parseInt(parts[7]);
+                int targetY = Integer.parseInt(parts[8]);
+                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d at (%d,%d)%n",
+                        droneId, mission.getZoneId(), targetX, targetY);
+                drone.setMissionCoordinates(targetX, targetY);
+                drone.receiveMissionPush(mission);
                 break;
             }
 

@@ -1,4 +1,5 @@
 import java.io.IOException;
+import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.function.Consumer;
@@ -19,6 +20,7 @@ public class Scheduler implements Runnable {
     // ========= CONSTANTS =======
     public static final int PORT = 6000;
     private static final int BUFFER_SIZE = 1024;
+    private static final int FULL_BATTERY_LEVEL = 100;
 
 
     // ====== SCHEDULER STATE MACHINE ======
@@ -147,10 +149,12 @@ public class Scheduler implements Runnable {
         String[] parts = message.split("\\|");
         switch (parts[0]) {
             case "startClock": {
-                int speed        = Integer.parseInt(parts[2]);
+                int speed = Integer.parseInt(parts[2]);
                 clock.setClockSpeedMultiplier(speed);
-                clock.setSimulationStartTime(0, 0, 0);
-                new Thread(clock, "SimulationClock").start();
+                clock.setSimulationStartTime(0, 0, 0);  // always reset to 0 for new run
+                if (!clock.isRunning()) {
+                    new Thread(clock, "SimulationClock").start();
+                }
                 sendReply("ACK", addr, port);
                 System.out.printf("Scheduler: Clock started at %s (x%d)%n",
                         clock.getFormattedTime(), speed);
@@ -164,11 +168,12 @@ public class Scheduler implements Runnable {
                 int y = Integer.parseInt(parts[3]);
                 int water = Integer.parseInt(parts[4]);
                 int listenPort = Integer.parseInt(parts[5]);
+                int battery = Integer.parseInt(parts[6]);
 
                 // Remove any stale entry for this droneId from a previous run
                 droneRegistry.remove(droneId);
 
-                DroneInfo info = new DroneInfo(droneId, x, y, water, addr, listenPort);
+                DroneInfo info = new DroneInfo(droneId, x, y, water, addr, listenPort, battery);
                 droneRegistry.put(droneId, info);
                 System.out.printf("Scheduler: Drone %d registered at %s:%d%n",
                         droneId, addr.getHostAddress(), listenPort);
@@ -178,14 +183,34 @@ public class Scheduler implements Runnable {
             }
 
             case "receiveFireEvent": {
-                FaultType fault = parts.length > 5 ? FaultType.from(parts[5]) : FaultType.NONE;
+                // receiveFireEvent|zoneId|eventType|severity|secondsFromStart
                 FireEvent event = new FireEvent(
                         Integer.parseInt(parts[1]),
                         parts[2],
                         parts[3],
-                        Integer.parseInt(parts[4]),
-                        fault);           // ← pass fault into FireEvent
+                        Integer.parseInt(parts[4]));
                 receiveFireEvent(event);
+                sendReply("ACK", addr, port);
+                break;
+            }
+
+            case "injectFaultEvent": {
+                // injectFaultEvent|droneId|faultType
+                // Sent by FireIncidentSubsystem when a fault row is reached in the CSV.
+                // We forward INJECT_FAULT directly to the target drone.
+                int       droneId = Integer.parseInt(parts[1]);
+                FaultType fault   = FaultType.from(parts[2]);
+                DroneInfo drone   = droneRegistry.get(droneId);
+
+                if (drone != null) {
+                    log(String.format("Scheduler [%s]: Injecting %s into Drone %d%n",
+                            clock.getFormattedTime(), fault, droneId));
+                    String injectMsg = "INJECT_FAULT|" + droneId + "|" + fault.name();
+                    byte[] data = injectMsg.getBytes();
+                    socket.send(new DatagramPacket(data, data.length, drone.address, drone.port));
+                } else {
+                    System.err.printf("Scheduler: injectFaultEvent — unknown droneId %d%n", droneId);
+                }
                 sendReply("ACK", addr, port);
                 break;
             }
@@ -236,22 +261,32 @@ public class Scheduler implements Runnable {
                 sendReply("ACK", addr, port);
                 break;
             }
+            case "batteryUpdate": {
+                // batteryUpdate|droneId|battery
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo info = droneRegistry.get(droneId);
+                if (info != null) {
+                    int battery = Integer.parseInt(parts[2]);
+                    info.batteryLevel     = battery;
+                }
+                sendReply("ACK", addr, port);
+                break;
+            }
 
             // Drone returns an interrupted mission for re-queuing
+            // rescheduleFireEvent|zoneId|eventType|severity|waterRemaining|secondsFromStart
             case "rescheduleFireEvent": {
-                FaultType fault = parts.length > 5 ? FaultType.from(parts[5]) : FaultType.NONE;
+                int waterRemaining = Integer.parseInt(parts[4]);
+                int secondsFromStart = Integer.parseInt(parts[5]);
                 FireEvent event = new FireEvent(
                         Integer.parseInt(parts[1]),
                         parts[2],
                         parts[3],
-                        Integer.parseInt(parts[4]),
-                        fault);
-
-                // The drone reports how much water the fire still needs
-                int waterStillNeeded = Integer.parseInt(parts[4]);
-                int originalWater = event.getWaterRemaining();
-                if (originalWater > waterStillNeeded) {
-                    event.waterUsed(originalWater - waterStillNeeded);
+                        secondsFromStart);
+                // Restore the exact water still needed so another drone picks up the right amount
+                int deficit = event.getWaterRemaining() - waterRemaining;
+                if (deficit > 0) {
+                    event.waterUsed(deficit);
                 }
                 rescheduleUnfinishedFireEvent(event);
                 sendReply("ACK", addr, port);
@@ -261,6 +296,23 @@ public class Scheduler implements Runnable {
             // FireIncidentSubsystem clock query
             case "getTime": {
                 sendReply(String.valueOf(clock.getSimulationTimeSeconds()), addr, port);
+                break;
+            }
+
+            case "loadZones": {
+                String filePath = parts[1];
+                try {
+                    List<String> errors = loadZonesFromFile(filePath);
+                    if (errors.isEmpty()) {
+                        sendReply("ACK", addr, port);
+                        log("Scheduler: Zones loaded from " + filePath);
+                    } else {
+                        sendReply("ERR|" + String.join(";", errors), addr, port);
+                        log("Scheduler: Zone load errors: " + errors);
+                    }
+                } catch (Exception e) {
+                    sendReply("ERR|" + e.getMessage(), addr, port);
+                }
                 break;
             }
 
@@ -315,6 +367,9 @@ public class Scheduler implements Runnable {
                 if (drone != null) drone.state = "IDLE";
                 log(String.format("Scheduler [%s]: Drone %d recovered — IDLE%n",
                         clock.getFormattedTime(), droneId));
+                // If the fault fired during extinguishing, the mission was abandoned
+                // without calling missionCompleted. Re-queue it so the fire is not lost.
+                retrieveAndRescheduleLostMission(droneId);
                 updateSchedulerState(0);
                 tryDispatch();
                 break;
@@ -341,7 +396,6 @@ public class Scheduler implements Runnable {
                     lost.getZoneId(),
                     (k, v) -> (v - lost.getWaterRemaining() <= 0)
                             ? null : v - lost.getWaterRemaining());
-            lost.clearFault();  // prevent fault from re-triggering on the next assigned drone
             rescheduleUnfinishedFireEvent(lost);
         }
     }
@@ -379,11 +433,8 @@ public class Scheduler implements Runnable {
             FireEvent droneMission;
             if (remainingWater > 0) {
                 // Partial assignment — put the remainder back at the front.
-                // The fault belongs only to the first drone assigned; clear it
-                // from the remainder so subsequent drones don't also fault.
                 droneMission = new FireEvent(mission, waterToAssign);
                 mission.waterUsed(waterToAssign);
-                mission.clearFault();
                 rescheduleUnfinishedFireEvent(mission);
                 log(String.format(
                         "Scheduler [%s]: Drone %d -> Zone %d PARTIAL"
@@ -399,7 +450,7 @@ public class Scheduler implements Runnable {
             }
 
             droneActiveMission.put(droneId, droneMission);
-            pushMissionToDrone(drone, droneMission);
+            pushMissionToDrone(drone, droneMission, zone.getCenterX(), zone.getCenterY());
             updateSchedulerState(remainingWater);
         }
     }
@@ -408,9 +459,9 @@ public class Scheduler implements Runnable {
     /**
      * Sends ASSIGN_MISSION directly to the drone's registered listen port.
      * <p>
-     * Message: ASSIGN_MISSION|zoneId|eventType|severity|waterAssigned|secondsFromStart
+     * Message: ASSIGN_MISSION|droneId|zoneId|eventType|severity|waterAssigned|secondsFromStart|targetX|targetY
      */
-    private void pushMissionToDrone(DroneInfo drone, FireEvent mission) {
+    private void pushMissionToDrone(DroneInfo drone, FireEvent mission, int targetX, int targetY) {
         try {
             String msg = "ASSIGN_MISSION|"
                     + drone.droneId                  + "|"
@@ -419,7 +470,8 @@ public class Scheduler implements Runnable {
                     + mission.getSeverity().name()    + "|"
                     + mission.getWaterRemaining()     + "|"
                     + mission.getSecondsFromStart()   + "|"
-                    + mission.getFaultType().name();
+                    + targetX                         + "|"
+                    + targetY;
             byte[] data = msg.getBytes();
             socket.send(new DatagramPacket(
                     data, data.length, drone.address, drone.port));
@@ -614,6 +666,7 @@ public class Scheduler implements Runnable {
         if (info != null) {
             info.state = "IDLE";
             info.waterRemaining = 15;
+            info.batteryLevel = 100;
         }
         refillingCount = Math.max(0, refillingCount - 1);
         updateSchedulerState(0);
@@ -640,6 +693,48 @@ public class Scheduler implements Runnable {
     }
 
     // =========== ACCESSORS FOR GUI & TESTING =========
+
+    /**
+     * Single-lock snapshot of all GUI-needed data.
+     * Replaces three separate synchronized calls so the EDT holds the
+     * Scheduler lock for one short window instead of three, reducing
+     * contention with the UDP dispatch loop.
+     */
+    public static class GuiSnapshot {
+        public final Map<Integer, DroneInfo> drones;
+        public final Map<Integer, Integer>   firesPerZone;
+        public final int[]                   fireCounts;   // [high, moderate, low]
+
+        GuiSnapshot(Map<Integer, DroneInfo> drones,
+                    Map<Integer, Integer> firesPerZone,
+                    int[] fireCounts) {
+            this.drones      = drones;
+            this.firesPerZone = firesPerZone;
+            this.fireCounts  = fireCounts;
+        }
+    }
+
+    public synchronized GuiSnapshot getGuiSnapshot() {
+        Map<Integer, DroneInfo> dronesCopy = new HashMap<>(droneRegistry);
+
+        Map<Integer, Integer> fires = new HashMap<>();
+        for (FireEvent e : highFireEventQueue)
+            fires.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (FireEvent e : moderateFireEventQueue)
+            fires.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (FireEvent e : lowFireEventQueue)
+            fires.merge(e.getZoneId(), e.getWaterRemaining(), Integer::sum);
+        for (Map.Entry<Integer, Integer> entry : assignedWaterPerZone.entrySet())
+            fires.merge(entry.getKey(), entry.getValue(), Integer::sum);
+
+        int[] counts = {
+                highFireEventQueue.size(),
+                moderateFireEventQueue.size(),
+                lowFireEventQueue.size()
+        };
+
+        return new GuiSnapshot(dronesCopy, fires, counts);
+    }
 
     public synchronized SchedulerState getCurrentState() {
         return currentState;
@@ -677,8 +772,106 @@ public class Scheduler implements Runnable {
         socket.send(new DatagramPacket(data, data.length, addr, port));
     }
 
+    public synchronized Map<Integer, Zone> getZones() {
+        return Collections.unmodifiableMap(zones);
+    }
+
+    /**
+     * Replaces the hardcoded zones with zones parsed from a CSV file.
+     *
+     * CSV format (header line then data):
+     *   ZoneID,xMin,xMax,yMin,yMax
+     *   1,0,14,0,14
+     *
+     * Validation: each zone must be a rectangle at least 3 cells wide and
+     * 3 cells tall so a 3x3 fire centre always fits inside it.
+     *
+     * @return list of validation/parse error messages; empty on success.
+     */
+    public synchronized List<String> loadZonesFromFile(String filePath) throws IOException {
+        List<String> errors = new ArrayList<>();
+        Map<Integer, Zone> newZones = new HashMap<>();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            boolean firstLine = true;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty() || line.startsWith("#")) continue;
+                if (firstLine) { firstLine = false; continue; } // skip header
+
+                String[] parts = line.split(",");
+                if (parts.length < 5) {
+                    errors.add("Invalid line (needs 5 columns): " + line.trim());
+                    continue;
+                }
+                try {
+                    int id   = Integer.parseInt(parts[0].trim());
+                    int xMin = Integer.parseInt(parts[1].trim());
+                    int xMax = Integer.parseInt(parts[2].trim());
+                    int yMin = Integer.parseInt(parts[3].trim());
+                    int yMax = Integer.parseInt(parts[4].trim());
+
+                    if (xMin < 0 || yMin < 0 || xMax <= xMin || yMax <= yMin) {
+                        errors.add("Zone " + id + ": invalid bounds (must have xMax>xMin, yMax>yMin, all >= 0)");
+                        continue;
+                    }
+                    if ((xMax - xMin + 1) < 3 || (yMax - yMin + 1) < 3) {
+                        errors.add("Zone " + id + ": must be at least 3 cells wide and 3 cells tall");
+                        continue;
+                    }
+                    if (newZones.containsKey(id)) {
+                        errors.add("Duplicate zone ID: " + id);
+                        continue;
+                    }
+                    newZones.put(id, new Zone(id, xMin, xMax, yMin, yMax));
+                } catch (NumberFormatException e) {
+                    errors.add("Non-numeric value in line: " + line.trim());
+                }
+            }
+        }
+
+        if (!errors.isEmpty()) return errors;
+        if (newZones.isEmpty()) {
+            errors.add("No valid zones found in file.");
+            return errors;
+        }
+
+        zones.clear();
+        zones.putAll(newZones);
+        System.out.println("Scheduler: Loaded " + zones.size() + " zones from " + filePath);
+        return errors;
+    }
+
     public void stop() {
         running = false;
         socket.close();
+    }
+
+    // =========== TEST HELPERS (package-private) ===========
+
+    /** Directly registers a drone without going through UDP. */
+    synchronized void registerDroneForTest(int droneId, int water) throws Exception {
+        DroneInfo info = new DroneInfo(droneId, 0, 0, water,
+                InetAddress.getByName("localhost"), 60000 + droneId, 100);
+        droneRegistry.put(droneId, info);
+    }
+
+    /** Returns a copy of a drone's current record, or null if unknown. */
+    synchronized DroneInfo getDroneInfo(int droneId) {
+        return droneRegistry.get(droneId);
+    }
+
+    /** Number of fires held in the pending queue for the given zone. */
+    synchronized int pendingFireCountForZone(int zoneId) {
+        Deque<FireEvent> q = pendingFiresByZone.get(zoneId);
+        return q == null ? 0 : q.size();
+    }
+
+    /** True if a fire for this zone is sitting in any priority dispatch queue. */
+    synchronized boolean hasQueuedFireForZone(int zoneId) {
+        for (FireEvent e : highFireEventQueue)     if (e.getZoneId() == zoneId) return true;
+        for (FireEvent e : moderateFireEventQueue) if (e.getZoneId() == zoneId) return true;
+        for (FireEvent e : lowFireEventQueue)      if (e.getZoneId() == zoneId) return true;
+        return false;
     }
 }

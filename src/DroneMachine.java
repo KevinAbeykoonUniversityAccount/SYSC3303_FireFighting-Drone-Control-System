@@ -1,7 +1,7 @@
 /**
  * Represents a single physical drone.
  *
- * Seperated from the subsystem, it represents a machine with no knowledge of UDP or
+ * Separated from the subsystem, it represents a machine with no knowledge of UDP or
  * networking. When it needs to report something to the Scheduler (position
  * update, mission complete, etc.) it calls the DroneCallback that was
  * injected at construction time. DroneSubsystem implements that interface
@@ -25,16 +25,10 @@ public class DroneMachine extends Thread {
         ONROUTE,
         EXTINGUISHING,
         RETURNING,
-        REFILLING,
+        REFILLING_AND_RECHARGING,
         FAULTED,
         DECOMMISSIONED
     }
-
-    // For soft faults, freeze after this many cells for smooth visual state transition
-    private static final int STUCK_AFTER_CELLS = 3;
-
-    // Soft fault recovery time in real milliseconds
-    private static final long SOFT_FAULT_RECOVERY_MS = 10_000;
 
 
     private static final double NOZZLE_OPEN_TIME  = 0.75;  // seconds
@@ -43,6 +37,8 @@ public class DroneMachine extends Thread {
     private static final int    MAX_CAPACITY      = 15;    // litres
     private static final long   FAULT_CHECK_MS    = 200;    // tick interval
     private static final long   SOFT_FAULT_WAIT_MS = 10_000; // recovery pause
+    private static final int FULL_BATTERY_LEVEL = 100;
+
 
     private final int droneId;
     private DroneState droneState;
@@ -51,8 +47,6 @@ public class DroneMachine extends Thread {
     private FireEvent currentMission;
 
     private volatile FaultType currentFaultType = FaultType.NONE;
-    /** Fault attached to the current mission; applied mid-flight or at extinguishing start. */
-    private volatile FaultType pendingFault     = FaultType.NONE;
 
     private int     xGridLocation;
     private int     yGridLocation;
@@ -64,6 +58,8 @@ public class DroneMachine extends Thread {
 
     private final DroneCallback callback;
     private final SimulationClock clock;
+
+    private int     batteryLevel;
 
 
     /**
@@ -80,6 +76,13 @@ public class DroneMachine extends Thread {
         this.clock           = SimulationClock.getInstance();
         this.incomingMission = null;
         this.currentMission  = null;
+        this.batteryLevel    = FULL_BATTERY_LEVEL;
+    }
+
+    /** Test-only constructor: starts the drone with a specific battery level. */
+    DroneMachine(int droneId, DroneCallback callback, int initialBattery) {
+        this(droneId, callback);
+        this.batteryLevel = initialBattery;
     }
 
     // Getters and Setters
@@ -89,10 +92,30 @@ public class DroneMachine extends Thread {
     public int        getWaterRemaining() { return waterRemaining; }
     public DroneState getDroneState()     { return droneState; }
     public FireEvent  getCurrentMission() { return currentMission; }
+    public int        getBatteryRemaining() { return batteryLevel; }
+    public int        getBatteryCapacity() { return FULL_BATTERY_LEVEL; }
+
+
 
     public synchronized void setState(DroneState s) {
         this.droneState = s;
         notifyAll();  // wake run() loop if it is waiting (e.g. for DECOMMISSION to arrive)
+    }
+
+    /**
+     * Reduces battery by the given amount and transitions to DECOMMISSIONED
+     * if the level hits 0. Returns true if the drone is now dead.
+     */
+    private boolean drainBattery(int amount) {
+        batteryLevel = Math.max(0, batteryLevel - amount);
+        callback.onBatteryUpdate(droneId, batteryLevel);
+        if (batteryLevel <= 0) {
+            System.out.printf("Drone %d: Battery depleted — decommissioning%n", droneId);
+            setState(DroneState.DECOMMISSIONED);
+            callback.onHardFault(droneId);
+            return true;
+        }
+        return false;
     }
 
 
@@ -101,12 +124,10 @@ public class DroneMachine extends Thread {
      * Wakes the run() loop if the drone is waiting idle.
      * Sets missionInterrupted if the drone is currently moving.
      *
-     * @param event the created fire event from fire incident subsystem
-     * @param faultType type of fault the event has attached
+     * @param event the fire event to carry out
      */
-    public synchronized void receiveMissionPush(FireEvent event, FaultType faultType) {
+    public synchronized void receiveMissionPush(FireEvent event) {
         this.incomingMission = event;
-        this.pendingFault    = faultType;   // deferred — applied mid-flight or at extinguish time
         if (droneState == DroneState.ONROUTE) {
             missionInterrupted = true;
         }
@@ -194,8 +215,9 @@ public class DroneMachine extends Thread {
      * Calls handleEvent(ARRIVED) on reaching the destination.
      */
     public void moveDrone() throws InterruptedException {
-        int cellsMoved = 0;
         while (xGridLocation != targetX || yGridLocation != targetY) {
+            if (drainBattery(1)) return;
+
             if (missionInterrupted) {
                 missionInterrupted = false;
                 return;
@@ -205,25 +227,20 @@ public class DroneMachine extends Thread {
             else if (targetX < xGridLocation) xGridLocation--;
             if      (targetY > yGridLocation) yGridLocation++;
             else if (targetY < yGridLocation) yGridLocation--;
-            cellsMoved++;
-
-            // Inject a deferred DRONE_STUCK fault mid-flight after STUCK_AFTER_CELLS cells
-            if (pendingFault == FaultType.DRONE_STUCK && cellsMoved >= STUCK_AFTER_CELLS) {
-                currentFaultType = pendingFault;
-                pendingFault     = FaultType.NONE;
-            }
 
             sleepInterruptibly(1000);
 
             // Check for fault injected during this step
             if (currentFaultType != FaultType.NONE) {
                 FaultType savedFault = currentFaultType;  // save before handleEvent consumes it
+                DroneState stateBeforeFault = droneState; // ONROUTE or RETURNING
                 handleEvent(droneEvents.FAULT);
                 if (droneState == DroneState.DECOMMISSIONED) return;
                 // Hard fault: state is FAULTED, waiting for async DECOMMISSION — stop moving
                 if (savedFault == FaultType.NOZZLE_FAULT) return;
-                // Soft fault recovered — restore state and keep going
-                setState(DroneState.ONROUTE);
+                // Soft fault recovered — restore the exact state active before the fault
+                // (RETURNING drones must stay RETURNING, not flip to ONROUTE)
+                setState(stateBeforeFault);
             }
 
             callback.onLocationUpdate(droneId, xGridLocation, yGridLocation,
@@ -263,13 +280,15 @@ public class DroneMachine extends Thread {
     }
 
 
-    public void refillWater() throws InterruptedException {
-        System.out.printf("Drone %d: Refilling [%s]%n",
+    public void refillWaterAndRechargeBattery() throws InterruptedException {
+        System.out.printf("Drone %d: Refilling water and recharging battery[%s]%n",
                 droneId, clock.getFormattedTime());
-        sleep(5000);
+        sleep(6000);
         waterRemaining = MAX_CAPACITY;
-        System.out.printf("Drone %d: Refill complete (%dL) [%s]%n",
+        batteryLevel = FULL_BATTERY_LEVEL;
+        System.out.printf("Drone %d: Refill and recharge complete (%dL) [%s]%n",
                 droneId, waterRemaining, clock.getFormattedTime());
+
     }
 
 
@@ -287,12 +306,16 @@ public class DroneMachine extends Thread {
                     setState(DroneState.ONROUTE);
                     updateMission();
 
-                    int mx = getXFromZone(currentMission.getZoneId());
-                    int my = getYFromZone(currentMission.getZoneId());
-                    setMissionCoordinates(mx, my);
+                    // Coordinates are set by DroneSubsystem before receiveMissionPush();
+                    // fall back to hardcoded lookup only if they weren't provided.
+                    if (!hasTarget) {
+                        setMissionCoordinates(
+                                getXFromZone(currentMission.getZoneId()),
+                                getYFromZone(currentMission.getZoneId()));
+                    }
 
                     System.out.printf("Drone %d: En-route to Zone %d at (%d,%d)%n",
-                            droneId, currentMission.getZoneId(), mx, my);
+                            droneId, currentMission.getZoneId(), targetX, targetY);
 
                     moveDrone();
                     break;
@@ -303,9 +326,9 @@ public class DroneMachine extends Thread {
                         handleEvent(droneEvents.COMPLETED_MISSION);
                     } else {
                         // Back at base after RETURNING
-                        setState(DroneState.REFILLING);
+                        setState(DroneState.REFILLING_AND_RECHARGING);
                         callback.onDroneRefilling(droneId);
-                        refillWater();
+                        refillWaterAndRechargeBattery();
                         callback.onDroneRefillComplete(droneId);
                         setState(DroneState.IDLE);
                     }
@@ -314,13 +337,6 @@ public class DroneMachine extends Thread {
 
                 case COMPLETED_MISSION: {
                     setState(DroneState.EXTINGUISHING);
-
-                    // Inject a deferred NOZZLE_FAULT now — at the moment the drone
-                    // tries to open the nozzle (realistic: jams on first spray attempt)
-                    if (pendingFault == FaultType.NOZZLE_FAULT) {
-                        currentFaultType = pendingFault;
-                        pendingFault     = FaultType.NONE;
-                    }
 
                     int waterUsed = extinguishFire(currentMission.getWaterRemaining());
 
@@ -335,11 +351,9 @@ public class DroneMachine extends Thread {
                         }
                         // Hard fault: state is FAULTED, run() will wait for DECOMMISSION
                         currentMission = null;
-                        pendingFault   = FaultType.NONE;
                         break;
                     }
 
-                    pendingFault = FaultType.NONE;   // mission finished cleanly
                     callback.onMissionCompleted(droneId,
                             currentMission.getZoneId(), waterUsed);
                     currentMission = null;
@@ -368,17 +382,38 @@ public class DroneMachine extends Thread {
                         setState(DroneState.FAULTED);
                         callback.onLocationUpdate(droneId, xGridLocation,
                                 yGridLocation, "FAULTED");
-                        sleep(SOFT_FAULT_WAIT_MS);
+
+                        // Drain 5% battery evenly across the pause duration
+                        final int FAULT_DRAIN_PERCENT = 5;
+                        long tickMs     = FAULT_CHECK_MS;
+                        long ticks      = SOFT_FAULT_WAIT_MS / tickMs;
+                        double drainPerTick = (double) FAULT_DRAIN_PERCENT / ticks;
+                        double drainAccumulator = 0;
+                        boolean batteryDead = false;
+                        for (long t = 0; t < ticks; t++) {
+                            sleep(tickMs);
+                            drainAccumulator += drainPerTick;
+                            if (drainAccumulator >= 1.0) {
+                                int drop = (int) drainAccumulator;
+                                drainAccumulator -= drop;
+                                if (drainBattery(drop)) { batteryDead = true; break; }
+                            }
+                        }
+                        if (batteryDead) return;
+
                         // Caller (moveDrone or COMPLETED_MISSION) restores state
-                        System.out.printf("Drone %d: Recovered from soft fault%n", droneId);
+                        System.out.printf("Drone %d: Recovered from soft fault (battery now %d%%)%n",
+                                droneId, batteryLevel);
 
                     } else if (fault == FaultType.NOZZLE_FAULT) {
                         // Hard fault — permanently shut down
                         System.out.printf(
                                 "Drone %d: HARD FAULT — nozzle jammed, decommissioning%n",
                                 droneId);
-                        setState(DroneState.FAULTED);
+                        //setState(DroneState.FAULTED);
+                        setState(DroneState.DECOMMISSIONED);
                         callback.onHardFault(droneId);
+
                         // DECOMMISSION arrives from Scheduler asynchronously
                         // via DroneSubsystem → handleEvent(DECOMMISSION)
                     }

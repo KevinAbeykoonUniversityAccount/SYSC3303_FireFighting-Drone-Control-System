@@ -7,7 +7,9 @@
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.util.List;
 
 public class DroneSwarmFrame extends JFrame {
     private MapPanel mapPanel;
@@ -16,7 +18,8 @@ public class DroneSwarmFrame extends JFrame {
     private DroneStatusPanel droneStatusPanel;
 
     private Scheduler model;
-    private Timer refreshTimer;
+    private Timer mapTimer;    // fast  — smooth drone movement on the map
+    private Timer statusTimer; // slow  — drone table + fire count label
 
     public DroneSwarmFrame(Scheduler model) {
         setTitle("Firefighting Drone Swarm - Control Center");
@@ -47,22 +50,19 @@ public class DroneSwarmFrame extends JFrame {
         setSize(1600, 1050);
         setLocationRelativeTo(null); // Center on screen
 
-        // Set up refresh timer for GUI elements (every 500 ms)
-        refreshTimer = new Timer(500, e -> refreshDisplay());
-        refreshTimer.start();
+        // Fast timer: only redraws the map (one synchronized snapshot call)
+        mapTimer = new Timer(100, e -> refreshMap());
+        mapTimer.start();
+
+        // Slow timer: updates the drone status table and fire counts
+        statusTimer = new Timer(500, e -> droneStatusPanel.refreshData());
+        statusTimer.start();
     }
 
-
-    private void refreshDisplay() {
+    private void refreshMap() {
         if (model != null) {
-            // Update drone positions and fire severities on map
-            mapPanel.updateDronesAndFires(
-                    model.getDroneRegistry(),
-                    model.getActiveFiresPerZone()
-            );
-
-            // Update drone status table and fire counts
-            droneStatusPanel.refreshData();
+            Scheduler.GuiSnapshot snap = model.getGuiSnapshot();
+            mapPanel.updateDronesAndFires(snap.drones, snap.firesPerZone);
         }
     }
 
@@ -73,35 +73,95 @@ public class DroneSwarmFrame extends JFrame {
 
 
     public class ControlPanel extends JPanel {
-        private StatusPanel statusPanel; // Reference to update logs
+        private StatusPanel statusPanel;
         private JButton loadFileButton;
+        private JButton loadZoneButton;
         private JButton startButton;
         private JButton stopButton;
         private JLabel fileLabel;
+        private String selectedFireFile = null;
 
         public ControlPanel(StatusPanel statusPanel) {
             this.statusPanel = statusPanel;
             setLayout(new FlowLayout(FlowLayout.LEFT));
             setBorder(new TitledBorder("Controls"));
 
-            // File selection button
+            // --- Load incident CSV ---
             loadFileButton = new JButton("Load Incident File");
-            //loadFileButton.addActionListener();
+            loadFileButton.addActionListener(e -> {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setFileFilter(new FileNameExtensionFilter("CSV Files", "csv"));
+                if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                    selectedFireFile = chooser.getSelectedFile().getAbsolutePath();
+                    fileLabel.setText(chooser.getSelectedFile().getName());
+                    startButton.setEnabled(true);
+                    statusPanel.logMessage("Incident file loaded: " + chooser.getSelectedFile().getName());
+                }
+            });
 
-            // Start/Stop buttons
+            // --- Load zone CSV ---
+            loadZoneButton = new JButton("Load Zone File");
+            loadZoneButton.addActionListener(e -> {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setFileFilter(new FileNameExtensionFilter("CSV Files", "csv"));
+                if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                    String zonePath = chooser.getSelectedFile().getAbsolutePath();
+                    try {
+                        List<String> errors = model.loadZonesFromFile(zonePath);
+                        if (errors.isEmpty()) {
+                            mapPanel.setZones(model.getZones());
+                            statusPanel.logMessage("Zones loaded: " + chooser.getSelectedFile().getName()
+                                    + " (" + model.getZones().size() + " zones)");
+                        } else {
+                            JOptionPane.showMessageDialog(this,
+                                    String.join("\n", errors),
+                                    "Zone Load Errors", JOptionPane.ERROR_MESSAGE);
+                        }
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(this,
+                                "Error loading zone file: " + ex.getMessage(),
+                                "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
+
+            // --- Start simulation: send loadFile to the running FireIncidentSubsystem ---
             startButton = new JButton("Start Simulation");
-            startButton.setEnabled(false); // Disabled until file loaded
-            //startButton.addActionListener();
+            startButton.setEnabled(false);
+            startButton.addActionListener(e -> {
+                if (selectedFireFile != null) {
+                    try {
+                        byte[] data = ("loadFile|" + selectedFireFile).getBytes();
+                        java.net.DatagramSocket sock = new java.net.DatagramSocket();
+                        sock.send(new java.net.DatagramPacket(data, data.length,
+                                java.net.InetAddress.getByName("localhost"),
+                                FireIncidentSubsystem.PORT));
+                        sock.close();
+                        startButton.setEnabled(false);
+                        stopButton.setEnabled(true);
+                        statusPanel.logMessage("Simulation started.");
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(this,
+                                "Could not reach FireIncidentSubsystem on port "
+                                        + FireIncidentSubsystem.PORT
+                                        + " — is FireIncidentMain running?\n" + ex.getMessage(),
+                                "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            });
 
+            // --- Stop button (UI feedback only — scheduler keeps running) ---
             stopButton = new JButton("Stop Simulation");
             stopButton.setEnabled(false);
-            //stopButton.addActionListener();
+            stopButton.addActionListener(e -> {
+                statusPanel.logMessage("Simulation stopped by user.");
+                stopButton.setEnabled(false);
+            });
 
-            // File name display
             fileLabel = new JLabel("No file loaded");
 
-            // Add components
             add(loadFileButton);
+            add(loadZoneButton);
             add(startButton);
             add(stopButton);
             add(fileLabel);

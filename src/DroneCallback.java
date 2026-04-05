@@ -12,6 +12,9 @@ public interface DroneCallback {
     /** Called every cell movement so the Scheduler can track position. */
     void onLocationUpdate(int droneId, int x, int y, String state);
 
+    /** Called every cell movement so the Scheduler can track battery life. */
+    void onBatteryUpdate(int droneId, int battery);
+
     /** Called when the drone has finished extinguishing at a zone. */
     void onMissionCompleted(int droneId, int zoneId, int waterUsed);
 

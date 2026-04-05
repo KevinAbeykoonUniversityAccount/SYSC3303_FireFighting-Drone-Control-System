@@ -45,13 +45,14 @@ public class SimulationClock implements Runnable {
                 long now = System.currentTimeMillis();
                 long elapsedRealMillis = now - lastUpdate;
 
-                if (elapsedRealMillis >= 100) { // Update at least every 100ms
-                    // Calculate how many simulation seconds have passed
+                if (elapsedRealMillis >= 100) {
                     double elapsedRealSeconds = elapsedRealMillis / 1000.0;
                     long elapsedSimSeconds = (long)(elapsedRealSeconds * clockSpeedMultiplier);
 
                     if (elapsedSimSeconds > 0) {
-                        simulationTimeSeconds += elapsedSimSeconds;
+                        synchronized (this) {
+                            simulationTimeSeconds += elapsedSimSeconds;
+                        }
                         lastUpdate = now;
                     }
                 }
@@ -60,6 +61,7 @@ public class SimulationClock implements Runnable {
                 break;
             }
         }
+        running = false;
     }
 
     /**
