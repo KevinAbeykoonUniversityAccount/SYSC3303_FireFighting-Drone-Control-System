@@ -18,6 +18,7 @@ public class Scheduler implements Runnable {
     // ========= CONSTANTS =======
     public static final int PORT = 6000;
     private static final int BUFFER_SIZE = 1024;
+    private static final int FULL_BATTERY_LEVEL = 100;
 
 
     // ====== SCHEDULER STATE MACHINE ======
@@ -134,11 +135,12 @@ public class Scheduler implements Runnable {
                 int y = Integer.parseInt(parts[3]);
                 int water = Integer.parseInt(parts[4]);
                 int listenPort = Integer.parseInt(parts[5]);
+                int battery = Integer.parseInt(parts[6]);
 
                 // Remove any stale entry for this droneId from a previous run
                 droneRegistry.remove(droneId);
 
-                DroneInfo info = new DroneInfo(droneId, x, y, water, addr, listenPort);
+                DroneInfo info = new DroneInfo(droneId, x, y, water, addr, listenPort, battery);
                 droneRegistry.put(droneId, info);
                 System.out.printf("Scheduler: Drone %d registered at %s:%d%n",
                         droneId, addr.getHostAddress(), listenPort);
@@ -202,6 +204,17 @@ public class Scheduler implements Runnable {
                     info.x     = newX;
                     info.y     = newY;
                     info.state = newState;
+                }
+                sendReply("ACK", addr, port);
+                break;
+            }
+            case "batteryUpdate": {
+                // batteryUpdate|droneId|battery
+                int droneId = Integer.parseInt(parts[1]);
+                DroneInfo info = droneRegistry.get(droneId);
+                if (info != null) {
+                    int battery = Integer.parseInt(parts[2]);
+                    info.batteryLevel     = battery;
                 }
                 sendReply("ACK", addr, port);
                 break;
@@ -584,6 +597,7 @@ public class Scheduler implements Runnable {
         if (info != null) {
             info.state = "IDLE";
             info.waterRemaining = 15;
+            info.batteryLevel = 100;
         }
         refillingCount = Math.max(0, refillingCount - 1);
         updateSchedulerState(0);

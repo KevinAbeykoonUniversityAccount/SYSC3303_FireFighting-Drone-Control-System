@@ -1,7 +1,7 @@
 /**
  * Represents a single physical drone.
  *
- * Seperated from the subsystem, it represents a machine with no knowledge of UDP or
+ * Separated from the subsystem, it represents a machine with no knowledge of UDP or
  * networking. When it needs to report something to the Scheduler (position
  * update, mission complete, etc.) it calls the DroneCallback that was
  * injected at construction time. DroneSubsystem implements that interface
@@ -25,7 +25,7 @@ public class DroneMachine extends Thread {
         ONROUTE,
         EXTINGUISHING,
         RETURNING,
-        REFILLING,
+        REFILLING_AND_RECHARGING,
         FAULTED,
         DECOMMISSIONED
     }
@@ -43,6 +43,8 @@ public class DroneMachine extends Thread {
     private static final int    MAX_CAPACITY      = 15;    // litres
     private static final long   FAULT_CHECK_MS    = 200;    // tick interval
     private static final long   SOFT_FAULT_WAIT_MS = 10_000; // recovery pause
+    private static final int FULL_BATTERY_LEVEL = 100;
+
 
     private final int droneId;
     private DroneState droneState;
@@ -65,6 +67,8 @@ public class DroneMachine extends Thread {
     private final DroneCallback callback;
     private final SimulationClock clock;
 
+    private int     batteryLevel;
+
 
     /**
      * @param droneId  unique drone identifier
@@ -80,6 +84,7 @@ public class DroneMachine extends Thread {
         this.clock           = SimulationClock.getInstance();
         this.incomingMission = null;
         this.currentMission  = null;
+        this.batteryLevel = FULL_BATTERY_LEVEL;
     }
 
     // Getters and Setters
@@ -89,6 +94,10 @@ public class DroneMachine extends Thread {
     public int        getWaterRemaining() { return waterRemaining; }
     public DroneState getDroneState()     { return droneState; }
     public FireEvent  getCurrentMission() { return currentMission; }
+    public int        getBatteryRemaining() { return batteryLevel; }
+    public int        getBatteryCapacity() { return FULL_BATTERY_LEVEL; }
+
+
 
     public synchronized void setState(DroneState s) {
         this.droneState = s;
@@ -196,6 +205,9 @@ public class DroneMachine extends Thread {
     public void moveDrone() throws InterruptedException {
         int cellsMoved = 0;
         while (xGridLocation != targetX || yGridLocation != targetY) {
+            batteryLevel -= 1; // It requires 0.1% to move one step
+            System.out.println(droneId + " battery "+batteryLevel);
+
             if (missionInterrupted) {
                 missionInterrupted = false;
                 return;
@@ -228,6 +240,7 @@ public class DroneMachine extends Thread {
 
             callback.onLocationUpdate(droneId, xGridLocation, yGridLocation,
                     droneState.name());
+            callback.onBatteryUpdate(droneId, batteryLevel);
         }
 
         hasTarget = false;
@@ -263,13 +276,15 @@ public class DroneMachine extends Thread {
     }
 
 
-    public void refillWater() throws InterruptedException {
-        System.out.printf("Drone %d: Refilling [%s]%n",
+    public void refillWaterAndRechargeBattery() throws InterruptedException {
+        System.out.printf("Drone %d: Refilling water and recharging battery[%s]%n",
                 droneId, clock.getFormattedTime());
-        sleep(5000);
+        sleep(6000);
         waterRemaining = MAX_CAPACITY;
-        System.out.printf("Drone %d: Refill complete (%dL) [%s]%n",
+        batteryLevel = FULL_BATTERY_LEVEL;
+        System.out.printf("Drone %d: Refill and recharge complete (%dL) [%s]%n",
                 droneId, waterRemaining, clock.getFormattedTime());
+
     }
 
 
@@ -303,9 +318,9 @@ public class DroneMachine extends Thread {
                         handleEvent(droneEvents.COMPLETED_MISSION);
                     } else {
                         // Back at base after RETURNING
-                        setState(DroneState.REFILLING);
+                        setState(DroneState.REFILLING_AND_RECHARGING);
                         callback.onDroneRefilling(droneId);
-                        refillWater();
+                        refillWaterAndRechargeBattery();
                         callback.onDroneRefillComplete(droneId);
                         setState(DroneState.IDLE);
                     }

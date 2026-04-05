@@ -16,14 +16,16 @@ public class DroneInfo {
     public String      state = "IDLE";
     public InetAddress address;
     public int         port;
+    public int         batteryLevel; // from 0 == empty to 100 == full
 
     public DroneInfo(int droneId, int x, int y, int water,
-                     InetAddress address, int port) {
+                     InetAddress address, int port, int batteryLevel) {
         this.droneId        = droneId;
         this.x              = x;
         this.y              = y;
         this.waterRemaining = water;
         this.address        = address;
         this.port           = port;
+        this.batteryLevel   = batteryLevel;
     }
 }
