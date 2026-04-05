@@ -35,7 +35,7 @@ public class DroneStatusPanel extends JPanel {
         setBackground(new Color(240, 240, 240));
 
         // Create table model with column names
-        String[] columnNames = {"ID", "State", "Water(L)", "Position"};
+        String[] columnNames = {"ID", "State", "Water(L)", "Battery (%)", "Position"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -89,10 +89,11 @@ public class DroneStatusPanel extends JPanel {
                 if (drone != null) {
                     String state = formatState(drone.state);
                     int water = drone.waterRemaining;
+                    int battery = drone.batteryLevel;
                     String pos = "(" + drone.x + "," + drone.y + ")";
 
                     tableModel.addRow(new Object[]{
-                            drone.droneId, state, water, pos
+                            drone.droneId, state, water,battery, pos
                     });
                 }
             }

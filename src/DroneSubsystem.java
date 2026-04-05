@@ -99,6 +99,11 @@ public class DroneSubsystem extends Thread implements DroneCallback {
     }
 
     @Override
+    public void onBatteryUpdate(int droneId, int battery) {
+        sendOnly("batteryUpdate|" + droneId + "|" + battery);
+    }
+
+    @Override
     public void onMissionCompleted(int droneId, int zoneId, int waterUsed) {
         try {
             sendAndReceive("missionCompleted|" + droneId + "|"
@@ -171,7 +176,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
      * All drones share this subsystem's port — the Scheduler includes the
      * droneId in every ASSIGN_MISSION push so we can route it here.
      *
-     * Message: registerDrone|droneId|x|y|water|listenPort
+     * Message: registerDrone|droneId|x|y|water|listenPort|battery
      */
     private void registerAllDrones() {
         int listenPort = socket.getLocalPort();
@@ -179,7 +184,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
             try {
                 sendAndReceive("registerDrone|" + drone.getDroneId() + "|"
                         + drone.getX() + "|" + drone.getY() + "|"
-                        + drone.getWaterRemaining() + "|" + listenPort);
+                        + drone.getWaterRemaining() + "|" + listenPort + "|" + drone.getBatteryRemaining());
                 System.out.printf("DroneSubsystem: Drone %d registered (port %d)%n",
                         drone.getDroneId(), listenPort);
             } catch (Exception e) {
