@@ -269,6 +269,23 @@ public class Scheduler implements Runnable {
                 break;
             }
 
+            case "loadZones": {
+                String filePath = parts[1];
+                try {
+                    List<String> errors = loadZonesFromFile(filePath);
+                    if (errors.isEmpty()) {
+                        sendReply("ACK", addr, port);
+                        log("Scheduler: Zones loaded from " + filePath);
+                    } else {
+                        sendReply("ERR|" + String.join(";", errors), addr, port);
+                        log("Scheduler: Zone load errors: " + errors);
+                    }
+                } catch (Exception e) {
+                    sendReply("ERR|" + e.getMessage(), addr, port);
+                }
+                break;
+            }
+
             // Soft fault
             case "droneFaulted": {
                 int droneId = Integer.parseInt(parts[1]);
@@ -798,5 +815,33 @@ public class Scheduler implements Runnable {
     public void stop() {
         running = false;
         socket.close();
+    }
+
+    // =========== TEST HELPERS (package-private) ===========
+
+    /** Directly registers a drone without going through UDP. */
+    synchronized void registerDroneForTest(int droneId, int water) throws Exception {
+        DroneInfo info = new DroneInfo(droneId, 0, 0, water,
+                InetAddress.getByName("localhost"), 60000 + droneId, 100);
+        droneRegistry.put(droneId, info);
+    }
+
+    /** Returns a copy of a drone's current record, or null if unknown. */
+    synchronized DroneInfo getDroneInfo(int droneId) {
+        return droneRegistry.get(droneId);
+    }
+
+    /** Number of fires held in the pending queue for the given zone. */
+    synchronized int pendingFireCountForZone(int zoneId) {
+        Deque<FireEvent> q = pendingFiresByZone.get(zoneId);
+        return q == null ? 0 : q.size();
+    }
+
+    /** True if a fire for this zone is sitting in any priority dispatch queue. */
+    synchronized boolean hasQueuedFireForZone(int zoneId) {
+        for (FireEvent e : highFireEventQueue)     if (e.getZoneId() == zoneId) return true;
+        for (FireEvent e : moderateFireEventQueue) if (e.getZoneId() == zoneId) return true;
+        for (FireEvent e : lowFireEventQueue)      if (e.getZoneId() == zoneId) return true;
+        return false;
     }
 }

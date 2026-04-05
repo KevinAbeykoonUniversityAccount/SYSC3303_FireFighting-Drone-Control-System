@@ -76,7 +76,13 @@ public class DroneMachine extends Thread {
         this.clock           = SimulationClock.getInstance();
         this.incomingMission = null;
         this.currentMission  = null;
-        this.batteryLevel = FULL_BATTERY_LEVEL;
+        this.batteryLevel    = FULL_BATTERY_LEVEL;
+    }
+
+    /** Test-only constructor: starts the drone with a specific battery level. */
+    DroneMachine(int droneId, DroneCallback callback, int initialBattery) {
+        this(droneId, callback);
+        this.batteryLevel = initialBattery;
     }
 
     // Getters and Setters
@@ -94,6 +100,22 @@ public class DroneMachine extends Thread {
     public synchronized void setState(DroneState s) {
         this.droneState = s;
         notifyAll();  // wake run() loop if it is waiting (e.g. for DECOMMISSION to arrive)
+    }
+
+    /**
+     * Reduces battery by the given amount and transitions to DECOMMISSIONED
+     * if the level hits 0. Returns true if the drone is now dead.
+     */
+    private boolean drainBattery(int amount) {
+        batteryLevel = Math.max(0, batteryLevel - amount);
+        callback.onBatteryUpdate(droneId, batteryLevel);
+        if (batteryLevel <= 0) {
+            System.out.printf("Drone %d: Battery depleted — decommissioning%n", droneId);
+            setState(DroneState.DECOMMISSIONED);
+            callback.onHardFault(droneId);
+            return true;
+        }
+        return false;
     }
 
 
@@ -194,8 +216,7 @@ public class DroneMachine extends Thread {
      */
     public void moveDrone() throws InterruptedException {
         while (xGridLocation != targetX || yGridLocation != targetY) {
-            batteryLevel -= 1; // It requires 0.1% to move one step
-            System.out.println(droneId + " battery "+batteryLevel);
+            if (drainBattery(1)) return;
 
             if (missionInterrupted) {
                 missionInterrupted = false;
@@ -224,7 +245,6 @@ public class DroneMachine extends Thread {
 
             callback.onLocationUpdate(droneId, xGridLocation, yGridLocation,
                     droneState.name());
-            callback.onBatteryUpdate(droneId, batteryLevel);
         }
 
         hasTarget = false;
@@ -362,9 +382,28 @@ public class DroneMachine extends Thread {
                         setState(DroneState.FAULTED);
                         callback.onLocationUpdate(droneId, xGridLocation,
                                 yGridLocation, "FAULTED");
-                        sleep(SOFT_FAULT_WAIT_MS);
+
+                        // Drain 5% battery evenly across the pause duration
+                        final int FAULT_DRAIN_PERCENT = 5;
+                        long tickMs     = FAULT_CHECK_MS;
+                        long ticks      = SOFT_FAULT_WAIT_MS / tickMs;
+                        double drainPerTick = (double) FAULT_DRAIN_PERCENT / ticks;
+                        double drainAccumulator = 0;
+                        boolean batteryDead = false;
+                        for (long t = 0; t < ticks; t++) {
+                            sleep(tickMs);
+                            drainAccumulator += drainPerTick;
+                            if (drainAccumulator >= 1.0) {
+                                int drop = (int) drainAccumulator;
+                                drainAccumulator -= drop;
+                                if (drainBattery(drop)) { batteryDead = true; break; }
+                            }
+                        }
+                        if (batteryDead) return;
+
                         // Caller (moveDrone or COMPLETED_MISSION) restores state
-                        System.out.printf("Drone %d: Recovered from soft fault%n", droneId);
+                        System.out.printf("Drone %d: Recovered from soft fault (battery now %d%%)%n",
+                                droneId, batteryLevel);
 
                     } else if (fault == FaultType.NOZZLE_FAULT) {
                         // Hard fault — permanently shut down

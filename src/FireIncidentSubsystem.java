@@ -138,14 +138,27 @@ public class FireIncidentSubsystem implements Runnable {
                         Thread.sleep(200);
                     }
 
-                    // Column 1: EventType  (FIRE | DRONE_STUCK | NOZZLE_FAULT)
-                    String eventType = parts[1].toUpperCase();
+                    // Support two column layouts:
+                    //   Layout A (original): Time, EventType, ZoneOrDroneID, Severity[, ...]
+                    //   Layout B (current):  Time, ZoneOrDroneID, EventType, Severity[, ...]
+                    // Detect by checking whether parts[1] parses as an integer (Layout B) or not (Layout A).
+                    String eventType;
+                    int    zoneOrDroneId;
+                    String severity;
+
+                    boolean layoutB = parts[1].matches("\\d+");
+                    if (layoutB) {
+                        zoneOrDroneId = Integer.parseInt(parts[1]);
+                        eventType     = parts[2].toUpperCase();
+                        severity      = parts.length > 3 ? parts[3] : "";
+                    } else {
+                        eventType     = parts[1].toUpperCase();
+                        zoneOrDroneId = Integer.parseInt(parts[2]);
+                        severity      = parts.length > 3 ? parts[3] : "";
+                    }
 
                     if (eventType.equals("FIRE")) {
-                        int    zoneId   = Integer.parseInt(parts[2]);
-                        String severity = parts[3];
-
-                        FireEvent event = new FireEvent(zoneId, "FIRE", severity, eventTimeSeconds);
+                        FireEvent event = new FireEvent(zoneOrDroneId, "FIRE", severity, eventTimeSeconds);
                         System.out.printf("FireIncidentSubsystem: Sending Fire Event: %s%n", event);
 
                         sendAndReceive("receiveFireEvent|"
@@ -155,14 +168,13 @@ public class FireIncidentSubsystem implements Runnable {
                                 + event.getSecondsFromStart());
 
                     } else {
-                        int       droneId   = Integer.parseInt(parts[2]);
                         FaultType faultType = FaultType.from(eventType);
 
                         System.out.printf(
                                 "FireIncidentSubsystem: Sending Fault Event: %s -> Drone %d%n",
-                                faultType, droneId);
+                                faultType, zoneOrDroneId);
 
-                        sendAndReceive("injectFaultEvent|" + droneId + "|" + faultType.name());
+                        sendAndReceive("injectFaultEvent|" + zoneOrDroneId + "|" + faultType.name());
                     }
 
                 } catch (Exception e) {
