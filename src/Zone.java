@@ -53,4 +53,9 @@ public class Zone {
     public int getCenterY() {
         return (yMin + yMax) / 2;
     }
+
+    public int getXMin() { return xMin; }
+    public int getXMax() { return xMax; }
+    public int getYMin() { return yMin; }
+    public int getYMax() { return yMax; }
 }

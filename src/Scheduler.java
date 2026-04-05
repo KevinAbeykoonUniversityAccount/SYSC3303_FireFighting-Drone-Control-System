@@ -1,3 +1,4 @@
+import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.function.Consumer;
@@ -117,10 +118,12 @@ public class Scheduler implements Runnable {
         String[] parts = message.split("\\|");
         switch (parts[0]) {
             case "startClock": {
-                int speed        = Integer.parseInt(parts[2]);
+                int speed = Integer.parseInt(parts[2]);
                 clock.setClockSpeedMultiplier(speed);
-                clock.setSimulationStartTime(0, 0, 0);
-                new Thread(clock, "SimulationClock").start();
+                clock.setSimulationStartTime(0, 0, 0);  // always reset to 0 for new run
+                if (!clock.isRunning()) {
+                    new Thread(clock, "SimulationClock").start();
+                }
                 sendReply("ACK", addr, port);
                 System.out.printf("Scheduler: Clock started at %s (x%d)%n",
                         clock.getFormattedTime(), speed);
@@ -304,6 +307,9 @@ public class Scheduler implements Runnable {
                 if (drone != null) drone.state = "IDLE";
                 log(String.format("Scheduler [%s]: Drone %d recovered — IDLE%n",
                         clock.getFormattedTime(), droneId));
+                // If the fault fired during extinguishing, the mission was abandoned
+                // without calling missionCompleted. Re-queue it so the fire is not lost.
+                retrieveAndRescheduleLostMission(droneId);
                 updateSchedulerState(0);
                 tryDispatch();
                 break;
@@ -384,7 +390,7 @@ public class Scheduler implements Runnable {
             }
 
             droneActiveMission.put(droneId, droneMission);
-            pushMissionToDrone(drone, droneMission);
+            pushMissionToDrone(drone, droneMission, zone.getCenterX(), zone.getCenterY());
             updateSchedulerState(remainingWater);
         }
     }
@@ -393,9 +399,9 @@ public class Scheduler implements Runnable {
     /**
      * Sends ASSIGN_MISSION directly to the drone's registered listen port.
      * <p>
-     * Message: ASSIGN_MISSION|zoneId|eventType|severity|waterAssigned|secondsFromStart
+     * Message: ASSIGN_MISSION|droneId|zoneId|eventType|severity|waterAssigned|secondsFromStart|targetX|targetY
      */
-    private void pushMissionToDrone(DroneInfo drone, FireEvent mission) {
+    private void pushMissionToDrone(DroneInfo drone, FireEvent mission, int targetX, int targetY) {
         try {
             String msg = "ASSIGN_MISSION|"
                     + drone.droneId                  + "|"
@@ -403,7 +409,9 @@ public class Scheduler implements Runnable {
                     + mission.getEventType()          + "|"
                     + mission.getSeverity().name()    + "|"
                     + mission.getWaterRemaining()     + "|"
-                    + mission.getSecondsFromStart();
+                    + mission.getSecondsFromStart()   + "|"
+                    + targetX                         + "|"
+                    + targetY;
             byte[] data = msg.getBytes();
             socket.send(new DatagramPacket(
                     data, data.length, drone.address, drone.port));
@@ -701,6 +709,76 @@ public class Scheduler implements Runnable {
             throws Exception {
         byte[] data = message.getBytes();
         socket.send(new DatagramPacket(data, data.length, addr, port));
+    }
+
+    public synchronized Map<Integer, Zone> getZones() {
+        return Collections.unmodifiableMap(zones);
+    }
+
+    /**
+     * Replaces the hardcoded zones with zones parsed from a CSV file.
+     *
+     * CSV format (header line then data):
+     *   ZoneID,xMin,xMax,yMin,yMax
+     *   1,0,14,0,14
+     *
+     * Validation: each zone must be a rectangle at least 3 cells wide and
+     * 3 cells tall so a 3x3 fire centre always fits inside it.
+     *
+     * @return list of validation/parse error messages; empty on success.
+     */
+    public synchronized List<String> loadZonesFromFile(String filePath) throws IOException {
+        List<String> errors = new ArrayList<>();
+        Map<Integer, Zone> newZones = new HashMap<>();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            String line;
+            boolean firstLine = true;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty() || line.startsWith("#")) continue;
+                if (firstLine) { firstLine = false; continue; } // skip header
+
+                String[] parts = line.split(",");
+                if (parts.length < 5) {
+                    errors.add("Invalid line (needs 5 columns): " + line.trim());
+                    continue;
+                }
+                try {
+                    int id   = Integer.parseInt(parts[0].trim());
+                    int xMin = Integer.parseInt(parts[1].trim());
+                    int xMax = Integer.parseInt(parts[2].trim());
+                    int yMin = Integer.parseInt(parts[3].trim());
+                    int yMax = Integer.parseInt(parts[4].trim());
+
+                    if (xMin < 0 || yMin < 0 || xMax <= xMin || yMax <= yMin) {
+                        errors.add("Zone " + id + ": invalid bounds (must have xMax>xMin, yMax>yMin, all >= 0)");
+                        continue;
+                    }
+                    if ((xMax - xMin + 1) < 3 || (yMax - yMin + 1) < 3) {
+                        errors.add("Zone " + id + ": must be at least 3 cells wide and 3 cells tall");
+                        continue;
+                    }
+                    if (newZones.containsKey(id)) {
+                        errors.add("Duplicate zone ID: " + id);
+                        continue;
+                    }
+                    newZones.put(id, new Zone(id, xMin, xMax, yMin, yMax));
+                } catch (NumberFormatException e) {
+                    errors.add("Non-numeric value in line: " + line.trim());
+                }
+            }
+        }
+
+        if (!errors.isEmpty()) return errors;
+        if (newZones.isEmpty()) {
+            errors.add("No valid zones found in file.");
+            return errors;
+        }
+
+        zones.clear();
+        zones.putAll(newZones);
+        System.out.println("Scheduler: Loaded " + zones.size() + " zones from " + filePath);
+        return errors;
     }
 
     public void stop() {

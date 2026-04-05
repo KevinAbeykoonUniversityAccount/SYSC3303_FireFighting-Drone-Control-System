@@ -203,7 +203,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
         switch (parts[0]) {
 
             case "ASSIGN_MISSION": {
-                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity [5]=water [6]=seconds
+                // [1]=droneId [2]=zoneId [3]=eventType [4]=severity [5]=water [6]=seconds [7]=targetX [8]=targetY
                 int droneId = Integer.parseInt(parts[1]);
                 DroneMachine drone = drones.get(droneId);
                 if (drone == null) {
@@ -216,8 +216,11 @@ public class DroneSubsystem extends Thread implements DroneCallback {
                         parts[4],
                         Integer.parseInt(parts[6]));
                 FireEvent mission = new FireEvent(base, Integer.parseInt(parts[5]));
-                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d%n",
-                        droneId, mission.getZoneId());
+                int targetX = Integer.parseInt(parts[7]);
+                int targetY = Integer.parseInt(parts[8]);
+                System.out.printf("DroneSubsystem: Routing to Drone %d → Zone %d at (%d,%d)%n",
+                        droneId, mission.getZoneId(), targetX, targetY);
+                drone.setMissionCoordinates(targetX, targetY);
                 drone.receiveMissionPush(mission);
                 break;
             }

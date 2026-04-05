@@ -4,46 +4,45 @@ import java.io.IOException;
 import java.net.*;
 
 /**
- * Reads the input CSV and dispatches events to the Scheduler over UDP.
+ * Listens on its own UDP port for a loadFile command from the GUI/Scheduler
+ * side, then reads the incident CSV and dispatches events to the Scheduler.
+ *
+ * Start this process first (alongside SchedulerMain), then trigger it by
+ * sending: loadFile|<absolute-path-to-csv>
  *
  * Input file format (4 columns):
  *   Time, EventType, ZoneOrDroneID, Severity
  *
- * FIRE rows    → receiveFireEvent   sent to Scheduler; ZoneOrDroneID is zone ID.
- * Fault rows   → injectFaultEvent   sent to Scheduler; ZoneOrDroneID is drone ID.
- *
- * Fault event types: DRONE_STUCK, NOZZLE_FAULT
- *
- * Example:
- *   01:00:00,FIRE,1,HIGH
- *   01:25:00,DRONE_STUCK,1,
- *   01:45:00,NOZZLE_FAULT,2,
+ * FIRE rows  → receiveFireEvent  to Scheduler; ZoneOrDroneID is zone ID.
+ * Fault rows → injectFaultEvent  to Scheduler; ZoneOrDroneID is drone ID.
  *
  * @author Rayyan Kashif (101274266)
  * @author Aryan Kumar Singh (101299776)
  */
 public class FireIncidentSubsystem implements Runnable {
 
+    /** Port this subsystem listens on for loadFile commands. */
+    public static final int PORT = 6001;
+
     private static final int BUFFER_SIZE = 1024;
     private static final int TIMEOUT_MS  = 5000;
     private static final int MAX_RETRIES = 3;
     private static final int CLOCK_SPEED = 60;
 
-    private final DatagramSocket socket;
+    private final DatagramSocket sendSocket;   // ephemeral, used to talk to Scheduler
+    private final DatagramSocket listenSocket; // bound to PORT, receives commands
     private final InetAddress    schedulerAddr;
     private final int            schedulerPort;
-    private final String         inputFileName;
 
-    public FireIncidentSubsystem(String schedulerHost, int schedulerPort,
-                                 String inputFileName) throws Exception {
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort) throws Exception {
         this.schedulerAddr = InetAddress.getByName(schedulerHost);
         this.schedulerPort = schedulerPort;
-        this.inputFileName = inputFileName;
-        this.socket        = new DatagramSocket();
-        this.socket.setSoTimeout(TIMEOUT_MS);
+        this.sendSocket    = new DatagramSocket();
+        this.sendSocket.setSoTimeout(TIMEOUT_MS);
+        this.listenSocket  = new DatagramSocket(PORT);
     }
 
-    // ==== UDP helpers ====
+    // ==== UDP helpers (talk to Scheduler) ====
 
     private String sendAndReceive(String message) throws Exception {
         byte[]         data    = message.getBytes();
@@ -53,9 +52,9 @@ public class FireIncidentSubsystem implements Runnable {
         DatagramPacket recvPkt = new DatagramPacket(buf, buf.length);
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            socket.send(sendPkt);
+            sendSocket.send(sendPkt);
             try {
-                socket.receive(recvPkt);
+                sendSocket.receive(recvPkt);
                 return new String(recvPkt.getData(), 0, recvPkt.getLength()).trim();
             } catch (SocketTimeoutException e) {
                 System.err.printf("FireIncidentSubsystem: timeout (attempt %d/%d)%n",
@@ -74,9 +73,39 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
 
+    // ==== Main loop: wait for loadFile commands ====
+
     @Override
     public void run() {
-        System.out.println("Starting FireIncidentSubsystem - Reading: " + inputFileName + "...\n");
+        System.out.println("FireIncidentSubsystem: Listening on port " + PORT
+                + " for loadFile commands...");
+        byte[] buf = new byte[BUFFER_SIZE];
+
+        while (true) {
+            try {
+                DatagramPacket pkt = new DatagramPacket(buf, buf.length);
+                listenSocket.receive(pkt);
+                String msg = new String(pkt.getData(), 0, pkt.getLength()).trim();
+
+                if (msg.startsWith("loadFile|")) {
+                    String filePath = msg.substring("loadFile|".length()).trim();
+                    System.out.println("FireIncidentSubsystem: Received loadFile -> " + filePath);
+                    Thread worker = new Thread(() -> processFile(filePath), "FireIncident-Worker");
+                    worker.setDaemon(true);
+                    worker.start();
+                } else {
+                    System.err.println("FireIncidentSubsystem: Unknown command: " + msg);
+                }
+            } catch (Exception e) {
+                System.err.println("FireIncidentSubsystem listen error: " + e.getMessage());
+            }
+        }
+    }
+
+    // ==== File processing (previously the body of run()) ====
+
+    private void processFile(String inputFileName) {
+        System.out.println("FireIncidentSubsystem: Processing file: " + inputFileName);
 
         try (BufferedReader br = new BufferedReader(new FileReader(inputFileName))) {
             String  line;
@@ -88,7 +117,6 @@ public class FireIncidentSubsystem implements Runnable {
                 if (isFirstLine) { isFirstLine = false; continue; }  // skip header
 
                 try {
-                    // Split on comma; allow optional whitespace around each token
                     String[] parts = line.split(",", -1);
                     for (int i = 0; i < parts.length; i++) parts[i] = parts[i].trim();
 
@@ -114,7 +142,6 @@ public class FireIncidentSubsystem implements Runnable {
                     String eventType = parts[1].toUpperCase();
 
                     if (eventType.equals("FIRE")) {
-                        // Column 2: Zone ID   Column 3: Severity
                         int    zoneId   = Integer.parseInt(parts[2]);
                         String severity = parts[3];
 
@@ -122,13 +149,12 @@ public class FireIncidentSubsystem implements Runnable {
                         System.out.printf("FireIncidentSubsystem: Sending Fire Event: %s%n", event);
 
                         sendAndReceive("receiveFireEvent|"
-                                + event.getZoneId()          + "|"
-                                + event.getEventType()        + "|"
-                                + event.getSeverity().name()  + "|"
+                                + event.getZoneId()         + "|"
+                                + event.getEventType()       + "|"
+                                + event.getSeverity().name() + "|"
                                 + event.getSecondsFromStart());
 
                     } else {
-                        // Fault event — Column 2 is the target drone ID
                         int       droneId   = Integer.parseInt(parts[2]);
                         FaultType faultType = FaultType.from(eventType);
 
@@ -144,10 +170,11 @@ public class FireIncidentSubsystem implements Runnable {
                     e.printStackTrace();
                 }
             }
+
+            System.out.println("FireIncidentSubsystem: All events from " + inputFileName + " dispatched.");
+
         } catch (IOException e) {
             System.err.println("FireIncidentSubsystem File Error: " + e.getMessage());
         }
-
-        socket.close();
     }
 }
