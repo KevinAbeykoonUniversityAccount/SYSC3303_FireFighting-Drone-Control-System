@@ -26,7 +26,7 @@ public class FireIncidentMain {
         }
 
         FireIncidentSubsystem subsystem =
-                new FireIncidentSubsystem(host, Scheduler.PORT);
+                new FireIncidentSubsystem(host, Scheduler.PORT, incFile);
         new Thread(subsystem, "FireIncident").start();
         System.out.println("FireIncidentMain: ready on port "
                 + FireIncidentSubsystem.PORT + ", waiting for loadFile command.");
