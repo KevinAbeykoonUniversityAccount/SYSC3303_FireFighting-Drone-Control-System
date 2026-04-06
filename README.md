@@ -136,6 +136,10 @@ All unit tests relevant to iteration 5 are located in the `test/Iteration 5/` di
   #### Iteration 3
   - Reworked DroneSubsystem and Scheduler
   - Updated DroneSubsystem state machine diagram
+  #### Iteration 4
+  - Worked on Unit Tests
+  #### Iteration 5
+  - Worked on EventLogger and Metrics Analysis
 
 ### 4. Rayyan Kashif (101274266)
   #### Iteration 1
