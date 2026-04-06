@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.*;
             @Override public void onDroneRefillComplete(int droneId) {}
             @Override public void onHardFault(int droneId) {}
             @Override public void onDroneRecovered(int droneId) {}
+            @Override public void log(String msg) {}
         };
 
         @BeforeEach
