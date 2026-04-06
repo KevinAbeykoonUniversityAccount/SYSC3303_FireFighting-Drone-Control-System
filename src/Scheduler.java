@@ -71,7 +71,9 @@ public class Scheduler implements Runnable {
     private void log(String msg) {
         System.out.print(msg);
         if (logCallback != null) logCallback.accept(msg.trim());
+    }
 
+    public void logEvent(String msg) {
         byte[] event = msg.getBytes();
         try {
             socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
@@ -124,7 +126,7 @@ public class Scheduler implements Runnable {
 
     @Override
     public void run() {
-        log("Scheduler Started");
+        logEvent("Scheduler Started");
         byte[] buf = new byte[BUFFER_SIZE];
         while (running) {
             try {
