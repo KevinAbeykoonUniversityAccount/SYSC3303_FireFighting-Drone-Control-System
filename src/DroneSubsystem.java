@@ -294,7 +294,7 @@ public class DroneSubsystem extends Thread implements DroneCallback {
     @Override
     public void run() {
         System.out.println("DroneSubsystem: Starting");
-        log("Drone Subsystem Started");
+        log("DroneSubsystem,STARTED");
 
         // Start each drone's state machine on its own thread
         for (DroneMachine drone : drones.values()) {
@@ -328,5 +328,6 @@ public class DroneSubsystem extends Thread implements DroneCallback {
 
         socket.close();
         System.out.println("DroneSubsystem: Shut down");
+        log("DroneSubsystem,ENDED");
     }
 }
