@@ -54,7 +54,6 @@ This project simulates a **firefighting system using autonomous drones** coordin
 
 1. Run the Scheduler main class, which will open the GUI window. You can load zone
    and fire event files from the GUI, or use the terminal flags below.
-
       java -cp out/production/Project SchedulerMain
 
 2. Registers drones (e.g. four with IDs 1–4) with the Drone Subsystem. Add or remove IDs to change swarm size.
@@ -65,7 +64,7 @@ This project simulates a **firefighting system using autonomous drones** coordin
 
       java -cp out/production/Project FireIncidentMain --file src/fire_events.csv --zones src/zones.csv
 
-###NOTE: Ensure the csv event file is in the src folder.
+### NOTE: Ensure the csv event file is in the src folder.
 
 
 ## How To Run Tests
