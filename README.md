@@ -4,6 +4,7 @@
 This project simulates a **firefighting system using autonomous drones** coordinated by a central scheduler. Fire incidents occur over a defined time from an events sheet, drones are dispatched based on priority, and fires may require multiple drones to fully extinguish.
 
 
+
 ## Main Systems
 
 ### FireIncidentSubsystem
@@ -40,6 +41,7 @@ This project simulates a **firefighting system using autonomous drones** coordin
 - Must be at least 3×3 cells; provides getCenterX() / getCenterY() for drone dispatch
 
 
+
 ## Key Features
 
 - Priority-based fire scheduling
@@ -64,7 +66,8 @@ This project simulates a **firefighting system using autonomous drones** coordin
 
       java -cp out/production/Project FireIncidentMain --file src/fire_events.csv --zones src/zones.csv
 
-### NOTE: Ensure the csv event file is in the src folder.
+#### NOTE: Ensure the csv event file is in the src folder.
+
 
 
 ## How To Run Tests
