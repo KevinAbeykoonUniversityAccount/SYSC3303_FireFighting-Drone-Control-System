@@ -121,6 +121,10 @@ All unit tests relevant to iteration 5 are located in the `test/Iteration 5/` di
 #### Iteration 4
   - Implemented the fault handling system in DroneSubsystem, FireIncidentSubsystem, and Scheduler
   - I majorily did this by adding to the state based system: adding states for hard fault, entering a soft fault, and recovering from a soft fault
+#### Iteration 5
+  - Implemented the battery recharge mechanic
+  - Implemented the battery recharge mechanic's representation in the GUI
+  - Implemented the battery recharge tests
 
 ### 3. Abdullah Khan (101305235)
   #### Iteration 1
