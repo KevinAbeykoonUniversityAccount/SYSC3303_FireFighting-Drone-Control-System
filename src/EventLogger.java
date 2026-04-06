@@ -11,13 +11,39 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Listens for UDP event packets from the drone fire-suppression simulation,
+ * writes them to a log file, and prints performance metrics when the
+ * simulation ends.
+ *
+ * <p>Each subsystem (Scheduler, FireSubsystem, DroneSubsystem) sends an
+ * {@code ENDED} event when it shuts down. Once all three have signalled,
+ * the logger stops receiving, computes metrics from the completed log, and
+ * prints them to stdout.</p>
+ *
+ * <p>Implements {@link Runnable} so it can be run on a dedicated thread.</p>
+ */
 public class EventLogger implements Runnable{
+    /**
+     * Represents a single parsed event from the simulation.
+     *
+     * <p>Each event has a timestamp, the name of the entity that produced it,
+     * an event code, and an optional array of extra data fields.</p>
+     */
     private class EventLog {
         final long time;
         final String entity;
         final String code;
         final String[] data;
 
+        /**
+         * Constructs an EventLog with the given fields.
+         *
+         * @param time   epoch-millisecond timestamp
+         * @param entity name of the producing entity
+         * @param code   event code
+         * @param data   zero or more additional data fields
+         */
         public EventLog(long time, String entity, String code, String... data) {
             this.time = time;
             this.entity = entity;
@@ -25,14 +51,31 @@ public class EventLogger implements Runnable{
             this.data = data;
         }
 
+        /**
+         * Returns the name of the entity that produced this event.
+         *
+         * @return entity name
+         */
         public String getEntity() {
             return entity;
         }
 
+        /**
+         * Returns the event code for this log entry.
+         *
+         * @return event code string
+         */
         public String getCode() {
             return code;
         }
 
+        /**
+         * Returns a formatted log string suitable for writing to {@code log.txt}.
+         *
+         * <p>Format: {@code Event log: [yyyy-MM-dd HH:mm:ss.SSS, entity, code, data...]}</p>
+         *
+         * @return formatted log line
+         */
         public String toString() {
             Instant instantTime = Instant.ofEpochMilli(time);
             String formattedTime = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneId.systemDefault()).format(instantTime);
@@ -58,11 +101,25 @@ public class EventLogger implements Runnable{
     private boolean fireSystemRunning = true;
     private boolean droneSystemRunning = true;
 
+    /**
+     * Creates an EventLogger bound to {@link #DEFAULT_PORT}.
+     *
+     * @throws SocketException      if the UDP socket cannot be created or bound
+     * @throws UnknownHostException if the local host cannot be resolved
+     */
     public EventLogger() throws SocketException, UnknownHostException {
         this.port = DEFAULT_PORT;
         this.reciever = new DatagramSocket(port);
     }
 
+    /**
+     * Blocks until a UDP packet arrives, then parses and returns it as an {@link EventLog}.
+     *
+     * <p>Expects comma-separated packets in the form {@code entity,code} or
+     * {@code entity,code,data}. Returns {@code null} if an {@link IOException} occurs.</p>
+     *
+     * @return the parsed {@link EventLog}, or {@code null} on error
+     */
     public EventLog recieve() {
         byte[] buffer = new byte[100];
         EventLog log;
@@ -79,6 +136,11 @@ public class EventLogger implements Runnable{
         return null;
     }
 
+    /**
+     * Appends a single log line to {@code log.txt}.
+     *
+     * @param event the formatted log string to write
+     */
     public void writeLog(String event) {
         try {
             FileWriter writer = new FileWriter("log.txt", true);
@@ -89,6 +151,10 @@ public class EventLogger implements Runnable{
         }
     }
 
+    /**
+     * Truncates {@code log.txt} to zero bytes, discarding any previous run's data.
+     * Called at the start of each simulation run.
+     */
     public void clearLogFile() {
         try {
             FileWriter writer = new FileWriter("log.txt");
@@ -98,12 +164,27 @@ public class EventLogger implements Runnable{
         }
     }
 
+    /**
+     * Checks whether the given event signals that a subsystem has finished,
+     * and clears the corresponding running flag if so.
+     *
+     * <p>The main loop in {@link #run()} continues only while at least one
+     * running flag is {@code true}.</p>
+     *
+     * @param event the event to inspect
+     */
     public void checkFlags(EventLog event) {
         if (event.getEntity().equals("Scheduler") && event.code.equals("ENDED")) schedulerRunning = false;
         if (event.getEntity().equals("FireSubsystem") && event.code.equals("ENDED")) fireSystemRunning = false;
         if (event.getEntity().equals("DroneSubsystem") && event.code.equals("ENDED")) droneSystemRunning = false;
     }
 
+    /**
+     * Reads the completed log file and prints all performance metrics to stdout.
+     *
+     * <p>Delegates to {@link #displayFireIncidentMetrics}, {@link #displayDroneMetrics},
+     * and {@link #displayOverallMetrics}.</p>
+     */
     public void displayMetrics() {
         List<String> logLines = readLogLines();
         List<EventLog> events = parseLogLines(logLines);
@@ -114,6 +195,11 @@ public class EventLogger implements Runnable{
         displayOverallMetrics(events);
     }
 
+    /**
+     * Reads all lines from {@code log.txt} and returns them as a list.
+     *
+     * @return list of raw log lines; empty if the file cannot be read
+     */
     private List<String> readLogLines() {
         List<String> lines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new FileReader("log.txt"))) {
@@ -123,6 +209,15 @@ public class EventLogger implements Runnable{
         return lines;
     }
 
+    /**
+     * Parses a list of raw log lines into {@link EventLog} objects.
+     *
+     * <p>Lines that do not match the expected format
+     * ({@code Event log: [timestamp, entity, code, data?]}) are silently skipped.</p>
+     *
+     * @param lines raw lines read from the log file
+     * @return ordered list of parsed {@link EventLog} entries
+     */
     private List<EventLog> parseLogLines(List<String> lines) {
         List<EventLog> events = new ArrayList<>();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
@@ -138,6 +233,19 @@ public class EventLogger implements Runnable{
         return events;
     }
 
+    /**
+     * Prints a per-incident table of fire response times and extinguish durations,
+     * followed by averages across all incidents.
+     *
+     * <p>For each {@code FIRE_EXTINGUISHED} event, this method looks up the
+     * corresponding {@code FIRE_DETECTED} event for the same zone and computes:</p>
+     * <ul>
+     *   <li><b>Dispatch lag</b> — time from detection to the first drone being sent {@code ONROUTE}</li>
+     *   <li><b>Extinguish duration</b> — time from detection to the fire being fully out</li>
+     * </ul>
+     *
+     * @param events ordered list of all parsed log events
+     */
     private void displayFireIncidentMetrics(List<EventLog> events) {
         Map<String, Long> lastDetected = new HashMap<>();
         List<long[]> responseTimes = new ArrayList<>();  // [responseMs, durationMs]
@@ -156,7 +264,6 @@ public class EventLogger implements Runnable{
                 long detectedAt = lastDetected.remove(zone);
                 long extinguishDuration = e.time - detectedAt;
 
-                // Find first ONROUTE event after fire detected
                 long dispatchLag = -1;
                 for (EventLog de : events) {
                     if (de.time >= detectedAt && de.getCode().equals("STATE_CHANGE")
@@ -184,8 +291,18 @@ public class EventLogger implements Runnable{
         }
     }
 
+    /**
+     * Prints a per-drone breakdown of mission count, total flight time, total idle time,
+     * and recharge cycles, followed by the average idle time across all drones.
+     *
+     * <p>Drone names are discovered dynamically from the log — any entity whose name
+     * starts with {@code "Drone "} is included. Flight time accumulates time spent in
+     * the {@code ONROUTE} and {@code EXTINGUISHING} states; idle time accumulates time
+     * spent in the {@code IDLE} state.</p>
+     *
+     * @param events ordered list of all parsed log events
+     */
     private void displayDroneMetrics(List<EventLog> events) {
-        // Discover all unique drone entities from the log
         List<String> drones = events.stream()
                 .map(EventLog::getEntity)
                 .filter(name -> name.startsWith("Drone "))
@@ -236,11 +353,17 @@ public class EventLogger implements Runnable{
         }
     }
 
+    /**
+     * Prints high-level simulation summary metrics including total runtime,
+     * time from first fire detected to last fire extinguished, and overall
+     * fire detection and extinguish counts.
+     *
+     * @param events ordered list of all parsed log events
+     */
     private void displayOverallMetrics(List<EventLog> events) {
         long logStart = events.get(0).time;
         long logEnd   = events.get(events.size() - 1).time;
 
-        // First fire event to last extinguish
         long firstFire = events.stream()
                 .filter(e -> e.getCode().equals("FIRE_DETECTED"))
                 .mapToLong(e -> e.time).min().orElse(logStart);
@@ -258,11 +381,28 @@ public class EventLogger implements Runnable{
         System.out.println("Total fires extinguished: " + totalExtinguished);
     }
 
+    /**
+     * Formats a millisecond duration as a human-readable string.
+     *
+     * <p>Durations under one second are expressed in milliseconds (e.g. {@code "450ms"});
+     * one second or longer are expressed in seconds with two decimal places (e.g. {@code "2.50s"}).</p>
+     *
+     * @param ms duration in milliseconds
+     * @return formatted duration string
+     */
     private String formatDuration(long ms) {
         if (ms < 1000) return ms + "ms";
         return String.format("%.2fs", ms / 1000.0);
     }
 
+    /**
+     * Entry point for the logger thread.
+     *
+     * <p>Clears the log file, then loops receiving UDP events and writing each to disk
+     * until all three subsystems have sent {@code ENDED} events or the thread is
+     * interrupted. Once the loop exits, {@link #displayMetrics()} is called to print
+     * the final performance report.</p>
+     */
     @Override
     public void run() {
         clearLogFile();
