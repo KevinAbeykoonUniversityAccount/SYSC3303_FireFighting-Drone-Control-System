@@ -100,6 +100,7 @@ public class DroneMachine extends Thread {
     public synchronized void setState(DroneState s) {
         this.droneState = s;
         notifyAll();  // wake run() loop if it is waiting (e.g. for DECOMMISSION to arrive)
+        log("Drone " + droneId + ",STATE_CHANGE," + s);
     }
 
     /**
@@ -442,7 +443,7 @@ public class DroneMachine extends Thread {
     @Override
     public void run() {
         System.out.printf("Drone %d: Starting%n", droneId);
-        log("Drone " + droneId + ": Started");
+        log("Drone " + droneId + ",STARTED");
 
         while (droneState != DroneState.DECOMMISSIONED) {
             // Wait for DroneSubsystem to push a mission via receiveMissionPush().
@@ -466,5 +467,6 @@ public class DroneMachine extends Thread {
         }
 
         System.out.printf("Drone %d: Shut down%n", droneId);
+        log("Drone " + droneId + ",ENDED");
     }
 }

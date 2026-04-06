@@ -126,7 +126,7 @@ public class Scheduler implements Runnable {
 
     @Override
     public void run() {
-        logEvent("Scheduler Started");
+        logEvent("Scheduler,STARTED");
         byte[] buf = new byte[BUFFER_SIZE];
         while (running) {
             try {
@@ -140,6 +140,7 @@ public class Scheduler implements Runnable {
                 System.err.println("Scheduler dispatch error: " + e.getMessage());
             }
         }
+        logEvent("Scheduler,ENDED");
     }
 
     /**
@@ -207,6 +208,7 @@ public class Scheduler implements Runnable {
                 if (drone != null) {
                     log(String.format("Scheduler [%s]: Injecting %s into Drone %d%n",
                             clock.getFormattedTime(), fault, droneId));
+                    logEvent("Scheduler,DRONE_FAULT,Drone " + droneId);
                     String injectMsg = "INJECT_FAULT|" + droneId + "|" + fault.name();
                     byte[] data = injectMsg.getBytes();
                     socket.send(new DatagramPacket(data, data.length, drone.address, drone.port));
@@ -534,6 +536,7 @@ public class Scheduler implements Runnable {
         log(String.format("Scheduler [%s]: Fire at Zone %d (severity=%s)%n",
                 clock.getFormattedTime(), event.getZoneId(), event.getSeverity()));
         enqueue(event);
+        logEvent("Scheduler,FIRE_DETECTED,ZONE " + event.getZoneId());
         if (currentState == SchedulerState.IDLE) {
             currentState = SchedulerState.DISPATCHING;
         }
@@ -632,6 +635,8 @@ public class Scheduler implements Runnable {
         // Reduce or remove the committed water entry for this zone
         assignedWaterPerZone.computeIfPresent(zoneId,
                 (k, v) -> (v - waterUsed <= 0) ? null : v - waterUsed);
+
+        if (!isZoneActive(zoneId)) logEvent("Scheduler,FIRE_EXTINGUISHED,ZONE " + zoneId);
 
         // Update the drone record
         DroneInfo info = droneRegistry.get(droneId);
