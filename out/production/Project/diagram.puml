@@ -1,0 +1,49 @@
+@startuml
+title UDP Message Flow — Drone Fire-Fighting System
+
+participant "FireIncidentSubsystem" as FIS
+participant "Scheduler :6000" as SCH
+participant "Drone N" as DRN
+
+DRN -> SCH : registerDrone|droneId|x|y|water|listenPort
+
+FIS -> SCH : getTime
+SCH --> FIS : <simulationTimeSeconds>
+
+FIS -> SCH : receiveFireEvent|zoneId|eventType|severity|secondsFromStart
+
+note over SCH : tryDispatch() selects\nclosest idle drone
+
+SCH -> DRN : ASSIGN_MISSION|zoneId|eventType|severity|waterAssigned|secondsFromStart
+
+loop every cell moved
+    DRN -> SCH : locationUpdate|droneId|x|y|ONROUTE
+end
+
+alt higher-priority fire arrives mid-flight
+    SCH -> DRN : ASSIGN_MISSION|zoneId2|eventType|severity2|waterAssigned|secondsFromStart
+    DRN -> SCH : rescheduleFireEvent|zoneId|eventType|severity|waterRemaining|secondsFromStart
+    note over SCH : original mission re-queued\nat front of priority queue
+else no interrupt
+    note over DRN : continues to original zone
+end
+
+note over DRN : arrived at zone centre\nruns extinguishFire()
+
+DRN -> SCH : missionCompleted|droneId|zoneId|waterUsed
+
+alt tank empty
+    DRN -> SCH : droneRefilling|droneId
+    loop every cell moved back to base
+        DRN -> SCH : locationUpdate|droneId|x|y|RETURNING
+    end
+    note over DRN : refillWater() — 5s
+    DRN -> SCH : droneRefillComplete|droneId
+    note over SCH : DroneInfo → IDLE\ncalls tryDispatch()
+else water remaining
+    note over SCH : DroneInfo → IDLE\ncalls tryDispatch()
+end
+
+SCH -> DRN : DECOMMISSION
+
+@enduml
