@@ -806,6 +806,10 @@ public class Scheduler implements Runnable {
                 if (line.trim().isEmpty() || line.startsWith("#")) continue;
                 if (firstLine) { firstLine = false; continue; } // skip header
 
+                line = line.replace("(","");
+                line = line.replace(")","");
+                line = line.replace(';',',');
+
                 String[] parts = line.split(",");
                 if (parts.length < 5) {
                     errors.add("Invalid line (needs 5 columns): " + line.trim());
@@ -813,10 +817,10 @@ public class Scheduler implements Runnable {
                 }
                 try {
                     int id   = Integer.parseInt(parts[0].trim());
-                    int xMin = Integer.parseInt(parts[1].trim());
-                    int xMax = Integer.parseInt(parts[2].trim());
-                    int yMin = Integer.parseInt(parts[3].trim());
-                    int yMax = Integer.parseInt(parts[4].trim());
+                    int xMin = Integer.parseInt(parts[1].trim())/100;
+                    int yMin = Integer.parseInt(parts[2].trim())/100;
+                    int xMax = Integer.parseInt(parts[3].trim())/100;
+                    int yMax = Integer.parseInt(parts[4].trim())/100;
 
                     if (xMin < 0 || yMin < 0 || xMax <= xMin || yMax <= yMin) {
                         errors.add("Zone " + id + ": invalid bounds (must have xMax>xMin, yMax>yMin, all >= 0)");
