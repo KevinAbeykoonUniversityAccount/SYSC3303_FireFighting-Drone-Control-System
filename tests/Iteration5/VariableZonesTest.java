@@ -1,4 +1,5 @@
 import org.junit.*;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.rules.TemporaryFolder;
 import java.io.*;
 import java.util.*;
@@ -24,6 +25,7 @@ public class VariableZonesTest {
         }
         return f;
     }
+
 
     /** 1. getCenterX returns the midpoint of xMin and xMax. */
     @Test
@@ -70,6 +72,7 @@ public class VariableZonesTest {
         } finally {
             s.stop();
         }
+
     }
 
     /** 5. A zone smaller than 90 m (3 grid cells) in either dimension is rejected. */

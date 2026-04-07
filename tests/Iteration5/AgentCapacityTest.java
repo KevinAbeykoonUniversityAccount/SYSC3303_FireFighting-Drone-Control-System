@@ -1,4 +1,6 @@
 import org.junit.*;
+import org.junit.jupiter.api.BeforeEach;
+
 import static org.junit.Assert.*;
 
 /**
@@ -13,7 +15,8 @@ public class AgentCapacityTest {
 
     @Before
     public void setUp() throws Exception {
-        scheduler = new Scheduler();   // binds port 6000
+        scheduler = new Scheduler();
+        new Thread(scheduler, "Scheduler").start();
     }
 
     @After

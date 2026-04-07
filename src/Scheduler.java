@@ -969,8 +969,10 @@ public class Scheduler implements Runnable {
     }
 
     public void stop() {
-        running = false;
-        socket.close();
+        if (socket != null && !socket.isClosed()) {
+            System.out.println("h");
+            socket.close();
+        }
     }
 
     // =========== TEST HELPERS (package-private) ===========
