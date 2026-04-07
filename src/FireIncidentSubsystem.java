@@ -59,6 +59,14 @@ public class FireIncidentSubsystem implements Runnable {
 
     // ==== UDP helpers (talk to Scheduler) ====
 
+    private boolean isZoneActive(int zoneId) {
+        try {
+            return "true".equals(sendAndReceive("isZoneActive|" + zoneId));
+        } catch (Exception e) {
+            return false; // if unreachable, allow the event through
+        }
+    }
+
     private String sendAndReceive(String message) throws Exception {
         byte[]         data    = message.getBytes();
         DatagramPacket sendPkt = new DatagramPacket(data, data.length,
@@ -180,6 +188,12 @@ public class FireIncidentSubsystem implements Runnable {
                     boolean isFire = eventType.equals("FIRE_EVENT") || eventType.equals("FIRE");
 
                     if (isFire) {
+                        if (isZoneActive(id)) {
+                            System.out.printf(
+                                    "FireIncidentSubsystem: Zone %d already has an active fire — skipping duplicate%n",
+                                    id);
+                            continue;
+                        }
                         FireEvent event = new FireEvent(id, "FIRE", severity, eventTimeSeconds);
                         System.out.printf("FireIncidentSubsystem: Sending Fire Event: %s%n", event);
 

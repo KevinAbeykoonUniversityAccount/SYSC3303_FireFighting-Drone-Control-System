@@ -307,6 +307,12 @@ public class Scheduler implements Runnable {
                 break;
             }
 
+            case "isZoneActive": {
+                int zoneId = Integer.parseInt(parts[1]);
+                sendReply(isZoneActive(zoneId) ? "true" : "false", addr, port);
+                break;
+            }
+
             case "loadZones": {
                 String filePath = parts[1];
                 try {
