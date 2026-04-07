@@ -41,4 +41,6 @@ public interface DroneCallback {
      * drone IDLE and call tryDispatch() again.
      */
     void onDroneRecovered(int droneId);
+
+    void log(String msg);
 }

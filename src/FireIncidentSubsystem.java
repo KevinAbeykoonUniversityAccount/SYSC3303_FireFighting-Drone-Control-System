@@ -33,13 +33,28 @@ public class FireIncidentSubsystem implements Runnable {
     private final DatagramSocket listenSocket; // bound to PORT, receives commands
     private final InetAddress    schedulerAddr;
     private final int            schedulerPort;
+    private final String         inputFileName;
+    private InetAddress loggerAddress;
 
-    public FireIncidentSubsystem(String schedulerHost, int schedulerPort) throws Exception {
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort, String inputFileName) throws Exception {
         this.schedulerAddr = InetAddress.getByName(schedulerHost);
         this.schedulerPort = schedulerPort;
-        this.sendSocket    = new DatagramSocket();
+        this.inputFileName = inputFileName;
+        this.sendSocket = new DatagramSocket();
         this.sendSocket.setSoTimeout(TIMEOUT_MS);
         this.listenSocket  = new DatagramSocket(PORT);
+        this.loggerAddress = InetAddress.getLocalHost();
+    }
+
+    public FireIncidentSubsystem(String schedulerHost, int schedulerPort, // CHANGED
+                                 String inputFileName, String loggerHost) throws Exception {
+        this.schedulerAddr = InetAddress.getByName(schedulerHost);
+        this.schedulerPort = schedulerPort;
+        this.inputFileName = inputFileName;
+        this.sendSocket = new DatagramSocket();
+        this.sendSocket.setSoTimeout(TIMEOUT_MS);
+        this.listenSocket  = new DatagramSocket(PORT);
+        this.loggerAddress = InetAddress.getByName(loggerHost);
     }
 
     // ==== UDP helpers (talk to Scheduler) ====
@@ -73,10 +88,20 @@ public class FireIncidentSubsystem implements Runnable {
         }
     }
 
+  public void log(String msg) {
+        byte[] event = msg.getBytes();
+        try {
+            sendSocket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+      
     // ==== Main loop: wait for loadFile commands ====
 
     @Override
     public void run() {
+        log("FireSubsystem,STARTED");
         System.out.println("FireIncidentSubsystem: Listening on port " + PORT
                 + " for loadFile commands...");
         byte[] buf = new byte[BUFFER_SIZE];
@@ -100,12 +125,14 @@ public class FireIncidentSubsystem implements Runnable {
                 System.err.println("FireIncidentSubsystem listen error: " + e.getMessage());
             }
         }
+        //log("FireSubsystem,ENDED");
     }
 
     // ==== File processing (previously the body of run()) ====
 
     private void processFile(String inputFileName) {
         System.out.println("FireIncidentSubsystem: Processing file: " + inputFileName);
+        log("FireSubsystem,PROCESSING_FILE," + inputFileName);
 
         try (BufferedReader br = new BufferedReader(new FileReader(inputFileName))) {
             String  line;
@@ -166,7 +193,6 @@ public class FireIncidentSubsystem implements Runnable {
                                 + event.getEventType()       + "|"
                                 + event.getSeverity().name() + "|"
                                 + event.getSecondsFromStart());
-
                     } else {
                         FaultType faultType = FaultType.from(eventType);
 
@@ -184,6 +210,7 @@ public class FireIncidentSubsystem implements Runnable {
             }
 
             System.out.println("FireIncidentSubsystem: All events from " + inputFileName + " dispatched.");
+            log("FireSubsystem,FILE_PROCESSED," + inputFileName);
 
         } catch (IOException e) {
             System.err.println("FireIncidentSubsystem File Error: " + e.getMessage());

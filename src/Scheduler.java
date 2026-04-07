@@ -1,3 +1,4 @@
+import java.io.IOException;
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -62,6 +63,7 @@ public class Scheduler implements Runnable {
 
     /** Callback that mirrors key log messages to the GUI System Log panel. */
     private volatile Consumer<String> logCallback = null;
+    private InetAddress loggerAddress;
 
     public void setLogCallback(Consumer<String> cb) { this.logCallback = cb; }
 
@@ -71,10 +73,19 @@ public class Scheduler implements Runnable {
         if (logCallback != null) logCallback.accept(msg.trim());
     }
 
+    public void logEvent(String msg) {
+        byte[] event = msg.getBytes();
+        try {
+            socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
 
     private final Map<Integer, FireEvent> droneActiveMission = new HashMap<>();
 
-    public Scheduler() throws SocketException {
+    public Scheduler() throws SocketException, UnknownHostException {
         highFireEventQueue = new LinkedList<>();
         moderateFireEventQueue = new LinkedList<>();
         lowFireEventQueue = new LinkedList<>();
@@ -83,6 +94,26 @@ public class Scheduler implements Runnable {
         zones = new HashMap<>();
         clock = SimulationClock.getInstance();
         socket = new DatagramSocket(PORT);
+        loggerAddress = InetAddress.getLocalHost();
+
+        zones.put(1, new Zone(1, 0, 14, 0, 14));
+        zones.put(2, new Zone(2, 15, 29, 0, 14));
+        zones.put(3, new Zone(3, 0, 14, 15, 29));
+        zones.put(4, new Zone(4, 15, 29, 15, 29));
+
+        System.out.println("Scheduler: Listening on UDP port " + PORT);
+    }
+
+    public Scheduler(String loggerHost) throws SocketException, UnknownHostException {
+        highFireEventQueue = new LinkedList<>();
+        moderateFireEventQueue = new LinkedList<>();
+        lowFireEventQueue = new LinkedList<>();
+        droneRegistry = new HashMap<>();
+        assignedWaterPerZone = new HashMap<>();
+        zones = new HashMap<>();
+        clock = SimulationClock.getInstance();
+        socket = new DatagramSocket(PORT);
+        this.loggerAddress = InetAddress.getByName(loggerHost);
 
         zones.put(1, new Zone(1, 0, 14, 0, 14));
         zones.put(2, new Zone(2, 15, 29, 0, 14));
@@ -95,6 +126,7 @@ public class Scheduler implements Runnable {
 
     @Override
     public void run() {
+        logEvent("Scheduler,STARTED");
         byte[] buf = new byte[BUFFER_SIZE];
         while (running) {
             try {
@@ -108,6 +140,7 @@ public class Scheduler implements Runnable {
                 System.err.println("Scheduler dispatch error: " + e.getMessage());
             }
         }
+        logEvent("Scheduler,ENDED");
     }
 
     /**
@@ -175,6 +208,7 @@ public class Scheduler implements Runnable {
                 if (drone != null) {
                     log(String.format("Scheduler [%s]: Injecting %s into Drone %d%n",
                             clock.getFormattedTime(), fault, droneId));
+                    logEvent("Scheduler,DRONE_FAULT,Drone " + droneId);
                     String injectMsg = "INJECT_FAULT|" + droneId + "|" + fault.name();
                     byte[] data = injectMsg.getBytes();
                     socket.send(new DatagramPacket(data, data.length, drone.address, drone.port));
@@ -502,6 +536,7 @@ public class Scheduler implements Runnable {
         log(String.format("Scheduler [%s]: Fire at Zone %d (severity=%s)%n",
                 clock.getFormattedTime(), event.getZoneId(), event.getSeverity()));
         enqueue(event);
+        logEvent("Scheduler,FIRE_DETECTED,ZONE " + event.getZoneId());
         if (currentState == SchedulerState.IDLE) {
             currentState = SchedulerState.DISPATCHING;
         }
@@ -600,6 +635,8 @@ public class Scheduler implements Runnable {
         // Reduce or remove the committed water entry for this zone
         assignedWaterPerZone.computeIfPresent(zoneId,
                 (k, v) -> (v - waterUsed <= 0) ? null : v - waterUsed);
+
+        if (!isZoneActive(zoneId)) logEvent("Scheduler,FIRE_EXTINGUISHED,ZONE " + zoneId);
 
         // Update the drone record
         DroneInfo info = droneRegistry.get(droneId);
