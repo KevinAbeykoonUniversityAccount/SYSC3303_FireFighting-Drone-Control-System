@@ -15,9 +15,10 @@ public class MapPanel extends JPanel {
     private Map<Integer, DroneInfo> drones = new HashMap<>();
     private Map<Integer, Integer> fireSeverityMap = new HashMap<>(); // zone -> total water needed
 
-    // Grid properties: cells each representing 100m x 100m; expands with loaded zones
-    private final int CELL_SIZE_PX = 25;
-    private final int GRID_CELLS = 30; // default / minimum
+    // Grid properties: expands with loaded zones
+    private final int CELL_SIZE_PX   = 25;
+    private final int GRID_CELLS     = 30; // default / minimum
+    private final int METERS_PER_CELL = Scheduler.METERS_PER_CELL; // keep in sync with Scheduler
     private int gridCols = GRID_CELLS;
     private int gridRows = GRID_CELLS;
 
@@ -51,13 +52,14 @@ public class MapPanel extends JPanel {
         extinguishingCells.clear();
         fireSeverityMap.clear();
 
-        int maxCol = GRID_CELLS - 1;
-        int maxRow = GRID_CELLS - 1;
+        int maxCol = 0;
+        int maxRow = 0;
         for (Zone sz : schedulerZones.values()) {
             zones.add(new ZoneRect(sz.getId(), sz.getXMin(), sz.getYMin(), sz.getXMax(), sz.getYMax()));
             maxCol = Math.max(maxCol, sz.getXMax());
             maxRow = Math.max(maxRow, sz.getYMax());
         }
+        // Grid exactly fits the loaded zones — no fixed minimum
         gridCols = maxCol + 1;
         gridRows = maxRow + 1;
         invalidate();
@@ -291,9 +293,11 @@ public class MapPanel extends JPanel {
         int gridH = gridRows * CELL_SIZE_PX;
         g2d.setColor(Color.BLACK);
         g2d.setFont(new Font("Arial", Font.BOLD, 14));
-        g2d.drawString(gridCols + "x" + gridRows + " Grid (" + (gridCols * 100) + "m x " + (gridRows * 100) + "m)", 10, gridH + 20);
+        int totalW = gridCols * METERS_PER_CELL;
+        int totalH = gridRows * METERS_PER_CELL;
+        g2d.drawString(gridCols + "x" + gridRows + " Grid (" + totalW + "m x " + totalH + "m)", 10, gridH + 20);
         g2d.setFont(new Font("Arial", Font.PLAIN, 10));
-        g2d.drawString("Each cell: 100m x 100m", 10, gridH + 35);
+        g2d.drawString("Each cell: " + METERS_PER_CELL + "m x " + METERS_PER_CELL + "m", 10, gridH + 35);
 
         drawLegend(g2d, gridH);
     }

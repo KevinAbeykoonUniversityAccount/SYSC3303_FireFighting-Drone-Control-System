@@ -31,13 +31,19 @@ public class DroneMachine extends Thread {
     }
 
 
-    private static final double NOZZLE_OPEN_TIME  = 0.75;  // seconds
-    private static final double NOZZLE_CLOSE_TIME = 0.75;  // seconds
-    private static final double FLOW_RATE         = 3.77;  // litres / second
+    private static final double NOZZLE_OPEN_TIME  = 0.75;  // simulation-seconds
+    private static final double NOZZLE_CLOSE_TIME = 0.75;  // simulation-seconds
+    private static final double FLOW_RATE         = 3.77;  // litres / simulation-second
     private static final int    MAX_CAPACITY      = 15;    // litres
-    private static final long   FAULT_CHECK_MS    = 200;    // tick interval
-    private static final long   SOFT_FAULT_WAIT_MS = 10_000; // recovery pause
-    private static final int FULL_BATTERY_LEVEL = 100;
+    private static final long   FAULT_CHECK_MS    = 200;   // real-ms tick interval (fixed)
+    private static final long   SOFT_FAULT_WAIT_SIM_S = 10; // soft-fault pause in simulation-seconds
+    private static final int    FULL_BATTERY_LEVEL = 100;
+
+    /** Converts simulation-seconds to real milliseconds using the current clock speed. */
+    private long simToRealMs(double simSeconds) {
+        int speed = clock.getClockSpeedMultiplier();
+        return Math.max(50, (long)(simSeconds * 1000.0 / speed));
+    }
 
 
     private final int droneId;
@@ -60,6 +66,7 @@ public class DroneMachine extends Thread {
     private final SimulationClock clock;
 
     private int     batteryLevel;
+    private volatile boolean returnToBaseRequested = false;
 
 
     /**
@@ -146,44 +153,18 @@ public class DroneMachine extends Thread {
         notifyAll();
     }
 
+    /** Called by DroneSubsystem when the Scheduler signals all missions are done. */
+    public synchronized void requestReturnToBase() {
+        returnToBaseRequested = true;
+        notifyAll(); // wakes a waiting-idle drone; mid-mission drones pick it up after finishing
+    }
+
     private void updateMission() {
         this.currentMission  = this.incomingMission;
         this.incomingMission = null;
     }
 
     // ============ Zone coordinate helpers ============
-
-    /**
-     * Returns the x coordinate of the fire incident based off zone
-     *
-     * @param zoneId The zone of target incident
-     * @return The x coordinate of the fire incident
-     */
-    private int getXFromZone(int zoneId) {
-        switch (zoneId) {
-            case 1: return 7;
-            case 2: return 22;
-            case 3: return 7;
-            case 4: return 22;
-            default: return 7;
-        }
-    }
-
-    /**
-     * Returns the y coordinate of the fire incident based off zone
-     *
-     * @param zoneId The zone of target fire incident
-     * @return The y coordinate of the fire incident
-     */
-    private int getYFromZone(int zoneId) {
-        switch (zoneId) {
-            case 1: return 7;
-            case 2: return 7;
-            case 3: return 22;
-            case 4: return 22;
-            default: return 7;
-        }
-    }
 
 
     /**
@@ -229,7 +210,7 @@ public class DroneMachine extends Thread {
             if      (targetY > yGridLocation) yGridLocation++;
             else if (targetY < yGridLocation) yGridLocation--;
 
-            sleepInterruptibly(1000);
+            sleepInterruptibly(simToRealMs(1));
 
             // Check for fault injected during this step
             if (currentFaultType != FaultType.NONE) {
@@ -265,13 +246,13 @@ public class DroneMachine extends Thread {
         System.out.printf("Drone %d: Extinguishing — dropping %dL%n",
                 droneId, waterToDrop);
 
-        sleepInterruptibly((long)(NOZZLE_OPEN_TIME * 1000));
+        sleepInterruptibly(simToRealMs(NOZZLE_OPEN_TIME));
         if (currentFaultType != FaultType.NONE) return -1;
 
-        sleepInterruptibly((long)(waterToDrop / FLOW_RATE * 1000));
+        sleepInterruptibly(simToRealMs(waterToDrop / FLOW_RATE));
         if (currentFaultType != FaultType.NONE) return -1;
 
-        sleepInterruptibly((long)(NOZZLE_CLOSE_TIME * 1000));
+        sleepInterruptibly(simToRealMs(NOZZLE_CLOSE_TIME));
         if (currentFaultType != FaultType.NONE) return -1;
 
         waterRemaining -= waterToDrop;
@@ -284,7 +265,7 @@ public class DroneMachine extends Thread {
     public void refillWaterAndRechargeBattery() throws InterruptedException {
         System.out.printf("Drone %d: Refilling water and recharging battery[%s]%n",
                 droneId, clock.getFormattedTime());
-        sleep(6000);
+        sleep(simToRealMs(6));
         waterRemaining = MAX_CAPACITY;
         batteryLevel = FULL_BATTERY_LEVEL;
         System.out.printf("Drone %d: Refill and recharge complete (%dL) [%s]%n",
@@ -306,14 +287,6 @@ public class DroneMachine extends Thread {
 
                     setState(DroneState.ONROUTE);
                     updateMission();
-
-                    // Coordinates are set by DroneSubsystem before receiveMissionPush();
-                    // fall back to hardcoded lookup only if they weren't provided.
-                    if (!hasTarget) {
-                        setMissionCoordinates(
-                                getXFromZone(currentMission.getZoneId()),
-                                getYFromZone(currentMission.getZoneId()));
-                    }
 
                     System.out.printf("Drone %d: En-route to Zone %d at (%d,%d)%n",
                             droneId, currentMission.getZoneId(), targetX, targetY);
@@ -387,7 +360,8 @@ public class DroneMachine extends Thread {
                         // Drain 5% battery evenly across the pause duration
                         final int FAULT_DRAIN_PERCENT = 5;
                         long tickMs     = FAULT_CHECK_MS;
-                        long ticks      = SOFT_FAULT_WAIT_MS / tickMs;
+                        long faultWaitMs = simToRealMs(SOFT_FAULT_WAIT_SIM_S);
+                        long ticks       = Math.max(1, faultWaitMs / tickMs);
                         double drainPerTick = (double) FAULT_DRAIN_PERCENT / ticks;
                         double drainAccumulator = 0;
                         boolean batteryDead = false;
@@ -450,7 +424,7 @@ public class DroneMachine extends Thread {
             // Also block here when FAULTED (hard fault) until DECOMMISSION arrives
             // from the Scheduler — setState(DECOMMISSIONED) calls notifyAll().
             synchronized (this) {
-                while ((incomingMission == null || droneState == DroneState.FAULTED)
+                while ((incomingMission == null && !returnToBaseRequested || droneState == DroneState.FAULTED)
                         && droneState != DroneState.DECOMMISSIONED) {
                     try {
                         wait();
@@ -461,8 +435,22 @@ public class DroneMachine extends Thread {
                 }
             }
 
-            if (droneState != DroneState.DECOMMISSIONED && incomingMission != null) {
+            if (droneState == DroneState.DECOMMISSIONED) break;
+
+            if (incomingMission != null) {
                 handleEvent(droneEvents.NEW_MISSION);
+            } else if (returnToBaseRequested && droneState == DroneState.IDLE) {
+                returnToBaseRequested = false;
+                if (xGridLocation != 0 || yGridLocation != 0) {
+                    System.out.printf("Drone %d: All missions done — returning to base%n", droneId);
+                    try {
+                        setState(DroneState.RETURNING);
+                        setMissionCoordinates(0, 0);
+                        moveDrone();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
             }
         }
 

@@ -1,4 +1,3 @@
-import java.io.IOException;
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -50,11 +49,16 @@ public class Scheduler implements Runnable {
     private final Map<Integer, Zone> zones;
     private final Map<Integer, Deque<FireEvent>> pendingFiresByZone = new HashMap<>();
 
+    /** Incremented every time zones are successfully replaced; GUI polls this. */
+    private volatile int zonesVersion = 0;
+
     // ======= COUNTERS & STATE ============
     private final SimulationClock clock;
     private SchedulerState currentState = SchedulerState.IDLE;
     private int activeMissionCount = 0;
     private int refillingCount = 0;
+    /** Prevents sending RETURN_TO_BASE more than once per completed simulation run. */
+    private boolean allDronesReturnedHome = false;
 
 
     // =========== NETWORKING =======
@@ -518,6 +522,7 @@ public class Scheduler implements Runnable {
     // =========== FIRE QUEUE MANAGEMENT ===========
 
     public synchronized void receiveFireEvent(FireEvent event) {
+        allDronesReturnedHome = false; // new fire means simulation isn't done yet
         int zoneId = event.getZoneId();
 
         // Check if this zone already has an active or queued fire
@@ -655,6 +660,7 @@ public class Scheduler implements Runnable {
         updateSchedulerState(0);
         tryDispatch();
         releasePendingFireForZone(zoneId);
+        checkAndSendDronesHome();
     }
 
     public synchronized void droneRefilling(int droneId) {
@@ -678,6 +684,44 @@ public class Scheduler implements Runnable {
         refillingCount = Math.max(0, refillingCount - 1);
         updateSchedulerState(0);
         tryDispatch();
+        checkAndSendDronesHome();
+    }
+
+    /**
+     * When all fire queues are empty and no missions are active, every IDLE
+     * drone that is not already at base is sent home.  Called after every
+     * mission completion and every refill — the first call that finds the
+     * system truly quiescent wins; subsequent calls are no-ops.
+     */
+    private void checkAndSendDronesHome() {
+        if (allDronesReturnedHome) return;
+        if (activeMissionCount > 0) return;
+        if (!highFireEventQueue.isEmpty() || !moderateFireEventQueue.isEmpty()
+                || !lowFireEventQueue.isEmpty()) return;
+        for (Deque<FireEvent> q : pendingFiresByZone.values()) {
+            if (!q.isEmpty()) return;
+        }
+        if (droneRegistry.isEmpty()) return;
+
+        allDronesReturnedHome = true;
+        log(String.format("Scheduler [%s]: All missions complete — sending idle drones to base%n",
+                clock.getFormattedTime()));
+
+        for (DroneInfo drone : droneRegistry.values()) {
+            if ("IDLE".equals(drone.state) && (drone.x != 0 || drone.y != 0)) {
+                try {
+                    String msg = "RETURN_TO_BASE|" + drone.droneId;
+                    byte[] data = msg.getBytes();
+                    socket.send(new DatagramPacket(data, data.length, drone.address, drone.port));
+                    drone.state = "RETURNING";
+                    log(String.format("Scheduler [%s]: Drone %d returning to base%n",
+                            clock.getFormattedTime(), drone.droneId));
+                } catch (Exception e) {
+                    System.err.printf("Scheduler: failed to send RETURN_TO_BASE to Drone %d%n",
+                            drone.droneId);
+                }
+            }
+        }
     }
 
     // =========== SCHEDULER STATE TRANSITIONS =========
@@ -783,21 +827,37 @@ public class Scheduler implements Runnable {
         return Collections.unmodifiableMap(zones);
     }
 
+    public int getZonesVersion() { return zonesVersion; }
+
+    /**
+     * Number of real-world metres represented by one grid cell.
+     * A 30×30 cell grid covers a 900 m × 900 m area.
+     */
+    public static final int METERS_PER_CELL = 30;
+
     /**
      * Replaces the hardcoded zones with zones parsed from a CSV file.
      *
-     * CSV format (header line then data):
-     *   ZoneID,xMin,xMax,yMin,yMax
-     *   1,0,14,0,14
+     * CSV format (header line then data rows):
+     *   ZoneID, ZoneStart, ZoneEnd
+     *   1, (0, 0), (450, 450)
      *
-     * Validation: each zone must be a rectangle at least 3 cells wide and
-     * 3 cells tall so a 3x3 fire centre always fits inside it.
+     * Coordinates are in metres and converted to grid cells by dividing by
+     * METERS_PER_CELL (30 m per cell).
+     *
+     * Validation:
+     *   - x2 > x1, y2 > y1, all values >= 0
+     *   - Width and height must each be at least 90 m (3 grid cells)
+     *   - No duplicate zone IDs
      *
      * @return list of validation/parse error messages; empty on success.
      */
     public synchronized List<String> loadZonesFromFile(String filePath) throws IOException {
         List<String> errors = new ArrayList<>();
         Map<Integer, Zone> newZones = new HashMap<>();
+
+        // Extract every non-negative integer from each line regardless of delimiter/parens.
+        java.util.regex.Pattern numPat = java.util.regex.Pattern.compile("\\d+");
 
         try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
             String line;
@@ -806,30 +866,43 @@ public class Scheduler implements Runnable {
                 if (line.trim().isEmpty() || line.startsWith("#")) continue;
                 if (firstLine) { firstLine = false; continue; } // skip header
 
-                String[] parts = line.split(",");
-                if (parts.length < 5) {
-                    errors.add("Invalid line (needs 5 columns): " + line.trim());
+                // Collect numbers: [zoneId, x1, y1, x2, y2]
+                java.util.regex.Matcher mat = numPat.matcher(line);
+                List<Integer> nums = new ArrayList<>();
+                while (mat.find()) nums.add(Integer.parseInt(mat.group()));
+
+                if (nums.size() < 5) {
+                    errors.add("Invalid line (expected ZoneID, (x1,y1), (x2,y2)): " + line.trim());
                     continue;
                 }
                 try {
-                    int id   = Integer.parseInt(parts[0].trim());
-                    int xMin = Integer.parseInt(parts[1].trim());
-                    int xMax = Integer.parseInt(parts[2].trim());
-                    int yMin = Integer.parseInt(parts[3].trim());
-                    int yMax = Integer.parseInt(parts[4].trim());
+                    int id       = nums.get(0);
+                    int x1Metres = nums.get(1);
+                    int y1Metres = nums.get(2);
+                    int x2Metres = nums.get(3);
+                    int y2Metres = nums.get(4);
 
-                    if (xMin < 0 || yMin < 0 || xMax <= xMin || yMax <= yMin) {
-                        errors.add("Zone " + id + ": invalid bounds (must have xMax>xMin, yMax>yMin, all >= 0)");
+                    if (x2Metres <= x1Metres || y2Metres <= y1Metres) {
+                        errors.add("Zone " + id + ": end point must be greater than start point in both axes");
                         continue;
                     }
-                    if ((xMax - xMin + 1) < 3 || (yMax - yMin + 1) < 3) {
-                        errors.add("Zone " + id + ": must be at least 3 cells wide and 3 cells tall");
+                    int minMetres = 3 * METERS_PER_CELL; // 90 m minimum per dimension
+                    if ((x2Metres - x1Metres) < minMetres || (y2Metres - y1Metres) < minMetres) {
+                        errors.add("Zone " + id + ": must be at least " + minMetres
+                                + " m wide and tall (3 grid cells each)");
                         continue;
                     }
                     if (newZones.containsKey(id)) {
                         errors.add("Duplicate zone ID: " + id);
                         continue;
                     }
+
+                    // End boundary is exclusive (shared edge between adjacent zones).
+                    // Subtract 1 so adjacent zones never claim the same cell.
+                    int xMin = x1Metres / METERS_PER_CELL;
+                    int xMax = x2Metres / METERS_PER_CELL - 1;
+                    int yMin = y1Metres / METERS_PER_CELL;
+                    int yMax = y2Metres / METERS_PER_CELL - 1;
                     newZones.put(id, new Zone(id, xMin, xMax, yMin, yMax));
                 } catch (NumberFormatException e) {
                     errors.add("Non-numeric value in line: " + line.trim());
@@ -843,8 +916,48 @@ public class Scheduler implements Runnable {
             return errors;
         }
 
+        // ── Coverage validation ───────────────────────────────────────────────
+        // Zones must tile the bounding rectangle exactly: no gaps, no overlaps.
+        int bxMin = Integer.MAX_VALUE, bxMax = 0;
+        int byMin = Integer.MAX_VALUE, byMax = 0;
+        for (Zone z : newZones.values()) {
+            bxMin = Math.min(bxMin, z.getXMin());  bxMax = Math.max(bxMax, z.getXMax());
+            byMin = Math.min(byMin, z.getYMin());  byMax = Math.max(byMax, z.getYMax());
+        }
+        int gridW = bxMax - bxMin + 1;
+        int gridH = byMax - byMin + 1;
+        boolean[][] covered = new boolean[gridW][gridH];
+
+        for (Zone z : newZones.values()) {
+            for (int x = z.getXMin(); x <= z.getXMax(); x++) {
+                for (int y = z.getYMin(); y <= z.getYMax(); y++) {
+                    int cx = x - bxMin, cy = y - byMin;
+                    if (covered[cx][cy]) {
+                        errors.add(String.format(
+                                "Zones overlap at cell (%d,%d) = (%dm,%dm)",
+                                x, y, x * METERS_PER_CELL, y * METERS_PER_CELL));
+                        return errors;
+                    }
+                    covered[cx][cy] = true;
+                }
+            }
+        }
+        for (int x = 0; x < gridW; x++) {
+            for (int y = 0; y < gridH; y++) {
+                if (!covered[x][y]) {
+                    int gx = x + bxMin, gy = y + byMin;
+                    errors.add(String.format(
+                            "Gap in zone coverage at cell (%d,%d) = (%dm,%dm)",
+                            gx, gy, gx * METERS_PER_CELL, gy * METERS_PER_CELL));
+                    return errors;
+                }
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         zones.clear();
         zones.putAll(newZones);
+        zonesVersion++;
         System.out.println("Scheduler: Loaded " + zones.size() + " zones from " + filePath);
         return errors;
     }

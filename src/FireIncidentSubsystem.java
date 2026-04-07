@@ -27,7 +27,7 @@ public class FireIncidentSubsystem implements Runnable {
     private static final int BUFFER_SIZE = 1024;
     private static final int TIMEOUT_MS  = 5000;
     private static final int MAX_RETRIES = 3;
-    private static final int CLOCK_SPEED = 60;
+    private static final int CLOCK_SPEED = 100;
 
     private final DatagramSocket sendSocket;   // ephemeral, used to talk to Scheduler
     private final DatagramSocket listenSocket; // bound to PORT, receives commands
@@ -165,27 +165,22 @@ public class FireIncidentSubsystem implements Runnable {
                         Thread.sleep(200);
                     }
 
-                    // Support two column layouts:
-                    //   Layout A (original): Time, EventType, ZoneOrDroneID, Severity[, ...]
-                    //   Layout B (current):  Time, ZoneOrDroneID, EventType, Severity[, ...]
-                    // Detect by checking whether parts[1] parses as an integer (Layout B) or not (Layout A).
-                    String eventType;
-                    int    zoneOrDroneId;
-                    String severity;
-
-                    boolean layoutB = parts[1].matches("\\d+");
-                    if (layoutB) {
-                        zoneOrDroneId = Integer.parseInt(parts[1]);
-                        eventType     = parts[2].toUpperCase();
-                        severity      = parts.length > 3 ? parts[3] : "";
-                    } else {
-                        eventType     = parts[1].toUpperCase();
-                        zoneOrDroneId = Integer.parseInt(parts[2]);
-                        severity      = parts.length > 3 ? parts[3] : "";
+                    // Expected format (4 columns):
+                    //   Time, ZoneID (or DroneID for faults), EventType, Severity
+                    // EventType values: FIRE_EVENT (or FIRE), DRONE_STUCK, NOZZLE_FAULT
+                    // Severity:         HIGH / MODERATE / LOW for fires; NONE (or blank) for faults
+                    if (parts.length < 3) {
+                        System.err.println("FireIncidentSubsystem: skipping short line: " + line);
+                        continue;
                     }
+                    int    id        = Integer.parseInt(parts[1]);
+                    String eventType = parts[2].toUpperCase().trim();
+                    String severity  = parts.length > 3 ? parts[3].trim() : "";
 
-                    if (eventType.equals("FIRE")) {
-                        FireEvent event = new FireEvent(zoneOrDroneId, "FIRE", severity, eventTimeSeconds);
+                    boolean isFire = eventType.equals("FIRE_EVENT") || eventType.equals("FIRE");
+
+                    if (isFire) {
+                        FireEvent event = new FireEvent(id, "FIRE", severity, eventTimeSeconds);
                         System.out.printf("FireIncidentSubsystem: Sending Fire Event: %s%n", event);
 
                         sendAndReceive("receiveFireEvent|"
@@ -195,12 +190,14 @@ public class FireIncidentSubsystem implements Runnable {
                                 + event.getSecondsFromStart());
                     } else {
                         FaultType faultType = FaultType.from(eventType);
-
-                        System.out.printf(
-                                "FireIncidentSubsystem: Sending Fault Event: %s -> Drone %d%n",
-                                faultType, zoneOrDroneId);
-
-                        sendAndReceive("injectFaultEvent|" + zoneOrDroneId + "|" + faultType.name());
+                        if (faultType == FaultType.NONE) {
+                            System.err.printf("FireIncidentSubsystem: unknown event type '%s' — skipping%n",
+                                    eventType);
+                            continue;
+                        }
+                        System.out.printf("FireIncidentSubsystem: Sending Fault Event: %s -> Drone %d%n",
+                                faultType, id);
+                        sendAndReceive("injectFaultEvent|" + id + "|" + faultType.name());
                     }
 
                 } catch (Exception e) {

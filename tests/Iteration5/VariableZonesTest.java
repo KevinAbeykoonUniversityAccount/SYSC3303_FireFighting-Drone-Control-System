@@ -55,11 +55,11 @@ public class VariableZonesTest {
     @Test
     public void validZoneFileLoadsWithNoErrors() throws Exception {
         File f = csv(
-            "ZoneID,xMin,xMax,yMin,yMax",
-            "1,0,14,0,14",
-            "2,15,29,0,14",
-            "3,0,14,15,29",
-            "4,15,29,15,29"
+            "ZoneID, ZoneStart, ZoneEnd",
+            "1, (0, 0), (450, 450)",
+            "2, (450, 0), (900, 450)",
+            "3, (0, 450), (450, 900)",
+            "4, (450, 450), (900, 900)"
         );
 
         Scheduler s = new Scheduler();
@@ -72,13 +72,13 @@ public class VariableZonesTest {
         }
     }
 
-    /** 5. A zone narrower than 3 cells in either dimension is rejected. */
+    /** 5. A zone smaller than 90 m (3 grid cells) in either dimension is rejected. */
     @Test
-    public void zoneSmallerThan3x3IsRejected() throws Exception {
-        // Width = xMax - xMin + 1 = 2  (too small)
+    public void zoneSmallerThan3CellsIsRejected() throws Exception {
+        // Width = 60 m < 90 m minimum
         File f = csv(
-            "ZoneID,xMin,xMax,yMin,yMax",
-            "1,0,1,0,10"
+            "ZoneID, ZoneStart, ZoneEnd",
+            "1, (0, 0), (60, 450)"
         );
 
         Scheduler s = new Scheduler();
@@ -94,9 +94,9 @@ public class VariableZonesTest {
     @Test
     public void duplicateZoneIdIsRejected() throws Exception {
         File f = csv(
-            "ZoneID,xMin,xMax,yMin,yMax",
-            "1,0,14,0,14",
-            "1,15,29,0,14"   // same ID
+            "ZoneID, ZoneStart, ZoneEnd",
+            "1, (0, 0), (450, 450)",
+            "1, (450, 0), (900, 450)"   // same ID
         );
 
         Scheduler s = new Scheduler();
@@ -111,7 +111,7 @@ public class VariableZonesTest {
     /** 7. A file with only the header row (no data) returns an error. */
     @Test
     public void emptyZoneFileReturnsError() throws Exception {
-        File f = csv("ZoneID,xMin,xMax,yMin,yMax");
+        File f = csv("ZoneID, ZoneStart, ZoneEnd");
 
         Scheduler s = new Scheduler();
         try {

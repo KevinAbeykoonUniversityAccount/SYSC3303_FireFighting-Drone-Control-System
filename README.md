@@ -66,7 +66,31 @@ This project simulates a **firefighting system using autonomous drones** coordin
 
       java -cp out/production/Project FireIncidentMain --file src/fire_events.csv --zones src/zones.csv
 
-#### NOTE: Ensure the csv event file is in the src folder.
+#### NOTE: Ensure CSV files are in the src folder (or provide an absolute path).
+
+### CSV File Formats
+
+**Fire events CSV** (`src/fire_events.csv`):
+```
+Time, ZoneID, EventType, Severity
+00:00:00, 1, FIRE_EVENT, HIGH
+00:05:00, 2, FIRE_EVENT, MODERATE
+00:25:00, 1, DRONE_STUCK, NONE
+00:42:00, 2, NOZZLE_FAULT, NONE
+```
+- `EventType`: `FIRE_EVENT` (or `FIRE`) for fires; `DRONE_STUCK` or `NOZZLE_FAULT` for faults
+- `Severity`: `HIGH` / `MODERATE` / `LOW` for fire events; `NONE` (or blank) for faults
+- For fault rows the ID column is the **drone ID**, not a zone ID
+
+**Zone definitions CSV** (`src/zones.csv`):
+```
+ZoneID, ZoneStart, ZoneEnd
+1, (0, 0), (450, 450)
+2, (450, 0), (900, 450)
+3, (0, 450), (450, 900)
+4, (450, 450), (900, 900)
+```
+Coordinates are in **metres**. Internally converted to grid cells at 30 m per cell (e.g. 450 m = 15 cells). Each zone must be a rectangle at least 90 m wide and 90 m tall (= 3 grid cells minimum per dimension).
 
 
 

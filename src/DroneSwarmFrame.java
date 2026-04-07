@@ -20,6 +20,7 @@ public class DroneSwarmFrame extends JFrame {
     private Scheduler model;
     private Timer mapTimer;    // fast  — smooth drone movement on the map
     private Timer statusTimer; // slow  — drone table + fire count label
+    private int lastZonesVersion = -1;
 
     public DroneSwarmFrame(Scheduler model) {
         setTitle("Firefighting Drone Swarm - Control Center");
@@ -61,6 +62,11 @@ public class DroneSwarmFrame extends JFrame {
 
     private void refreshMap() {
         if (model != null) {
+            int version = model.getZonesVersion();
+            if (version != lastZonesVersion) {
+                lastZonesVersion = version;
+                mapPanel.setZones(model.getZones());
+            }
             Scheduler.GuiSnapshot snap = model.getGuiSnapshot();
             mapPanel.updateDronesAndFires(snap.drones, snap.firesPerZone);
         }

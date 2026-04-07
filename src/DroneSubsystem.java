@@ -277,6 +277,15 @@ public class DroneSubsystem extends Thread implements DroneCallback {
                 break;
             }
 
+            case "RETURN_TO_BASE": {
+                int droneId = Integer.parseInt(parts[1]);
+                DroneMachine drone = drones.get(droneId);
+                if (drone != null) {
+                    drone.requestReturnToBase();
+                }
+                break;
+            }
+
             default:
                 System.err.println("DroneSubsystem: ignored unexpected message: " + parts[0]);
         }
