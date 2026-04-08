@@ -24,13 +24,12 @@ public class AgentCapacityTest {
         scheduler.stop();              // releases port 6000
     }
 
-    // ── helpers ───────────────────────────────────────────────────────────────
+    // ==== HELPER FUNCTIONS ====
 
     private FireEvent fire(int zoneId, String severity) {
         return new FireEvent(zoneId, "FIRE", severity, 0);
     }
 
-    // ── tests ─────────────────────────────────────────────────────────────────
 
     /**
      * 1. A drone with a full tank is dispatched immediately when a fire arrives.

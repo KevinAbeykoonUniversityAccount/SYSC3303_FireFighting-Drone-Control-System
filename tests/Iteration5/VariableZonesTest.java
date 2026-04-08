@@ -26,7 +26,6 @@ public class VariableZonesTest {
         return f;
     }
 
-
     /** 1. getCenterX returns the midpoint of xMin and xMax. */
     @Test
     public void zoneCenterXCalculatedCorrectly() {
@@ -51,8 +50,7 @@ public class VariableZonesTest {
         assertEquals(15, z.getYMax());
     }
 
-    // ── Scheduler CSV loading tests ───────────────────────────────────────────
-
+    // ==== Scheduler CSV loading tests ====
     /** 4. A well-formed zone file with multiple zones loads without errors. */
     @Test
     public void validZoneFileLoadsWithNoErrors() throws Exception {

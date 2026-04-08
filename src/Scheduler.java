@@ -82,7 +82,7 @@ public class Scheduler implements Runnable {
         try {
             socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
         } catch (IOException e) {
-            e.printStackTrace();
+            if (!socket.isClosed()) System.err.println("Scheduler logEvent error: " + e.getMessage());
         }
     }
 
@@ -969,8 +969,8 @@ public class Scheduler implements Runnable {
     }
 
     public void stop() {
+        running = false;
         if (socket != null && !socket.isClosed()) {
-            System.out.println("h");
             socket.close();
         }
     }
