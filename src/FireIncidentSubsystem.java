@@ -97,10 +97,11 @@ public class FireIncidentSubsystem implements Runnable {
     }
 
   public void log(String msg) {
-        byte[] event = msg.getBytes();
         try {
+            String time = sendAndReceive("getTime");
+            byte[] event = (time + "," + msg).getBytes();
             sendSocket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }

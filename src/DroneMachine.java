@@ -107,7 +107,9 @@ public class DroneMachine extends Thread {
     public synchronized void setState(DroneState s) {
         this.droneState = s;
         notifyAll();  // wake run() loop if it is waiting (e.g. for DECOMMISSION to arrive)
-        log("Drone " + droneId + ",STATE_CHANGE," + s);
+        String msg = "Drone " + droneId + ",STATE_CHANGE," + s;
+        if (currentMission != null) msg += ",ZONE " + currentMission.getZoneId();
+        log(msg);
     }
 
     /**

@@ -6,8 +6,8 @@ public class EventLoggerMain {
         EventLogger logger = new EventLogger();
         Thread thread = new Thread(logger, "EventLogger");
         thread.start();
-        Thread.sleep(200000);
-        thread.interrupt();
-        logger.displayMetrics();
+        //Thread.sleep(420000);
+        //thread.interrupt();
+        //logger.displayMetrics();
     }
 }

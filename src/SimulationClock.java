@@ -116,7 +116,7 @@ public class SimulationClock implements Runnable {
      * @param seconds Duration in seconds
      * @return  duration in HH:MM:SS string format
      */
-    private String formatTime(long seconds) {
+    public static String formatTime(long seconds) {
         long hours = seconds / 3600;
         long minutes = (seconds % 3600) / 60;
         long secs = seconds % 60;

@@ -78,7 +78,7 @@ public class Scheduler implements Runnable {
     }
 
     public void logEvent(String msg) {
-        byte[] event = msg.getBytes();
+        byte[] event = (clock.getSimulationTimeSeconds() + "," + msg).getBytes();
         try {
             socket.send(new DatagramPacket(event, event.length, loggerAddress, EventLogger.DEFAULT_PORT));
         } catch (IOException e) {
@@ -839,7 +839,7 @@ public class Scheduler implements Runnable {
      * Number of real-world metres represented by one grid cell.
      * A 30×30 cell grid covers a 900 m × 900 m area.
      */
-    public static final int METERS_PER_CELL = 30;
+    public static final int METERS_PER_CELL = 100;
 
     /**
      * Replaces the hardcoded zones with zones parsed from a CSV file.

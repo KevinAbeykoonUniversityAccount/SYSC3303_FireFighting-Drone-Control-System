@@ -9,6 +9,9 @@ import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
+import java.net.InetAddress;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.util.List;
 
 public class DroneSwarmFrame extends JFrame {
@@ -84,8 +87,10 @@ public class DroneSwarmFrame extends JFrame {
         private JButton loadZoneButton;
         private JButton startButton;
         private JButton stopButton;
+        private JButton printMetrics;
         private JLabel fileLabel;
         private String selectedFireFile = null;
+        private InetAddress loggerAddress;
 
         public ControlPanel(StatusPanel statusPanel) {
             this.statusPanel = statusPanel;
@@ -164,12 +169,31 @@ public class DroneSwarmFrame extends JFrame {
                 stopButton.setEnabled(false);
             });
 
+            // --- Print Metrics (Tells Event Logger to display the metrics) ---
+            try {
+                loggerAddress = InetAddress.getLocalHost();
+            } catch (UnknownHostException e) {
+                e.printStackTrace();
+            }
+            printMetrics = new JButton("Print Metrics");
+            printMetrics.addActionListener(e -> {
+                try {
+                    byte[] data = "printMetrics".getBytes();
+                    java.net.DatagramSocket sock = new java.net.DatagramSocket();
+                    sock.send(new java.net.DatagramPacket(data, data.length, loggerAddress, 9000));
+                    sock.close();
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+            });
+
             fileLabel = new JLabel("No file loaded");
 
             add(loadFileButton);
             add(loadZoneButton);
             add(startButton);
             add(stopButton);
+            add(printMetrics);
             add(fileLabel);
         }
     }
